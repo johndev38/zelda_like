@@ -1,13 +1,22 @@
 import Phaser from 'phaser';
+import { PlayerStats, getStatsByLevel } from '../config/PlayerStats';
 
 export class GameScene extends Phaser.Scene {
   // Propriétés du joueur
   private player!: Phaser.Physics.Arcade.Sprite;
-  private playerHealth: number = 3;
-  private playerMaxHealth: number = 5;
+  private playerHealth: number = PlayerStats.health.initial;
+  private playerMaxHealth: number = PlayerStats.health.maximum;
   private playerAttacking: boolean = false;
   private playerDirection: string = 'down';
   private playerHealthBar!: Phaser.GameObjects.Graphics;
+  private playerMana: number = PlayerStats.mana.initial;
+  private playerMaxMana: number = PlayerStats.mana.maximum;
+  private playerManaBar!: Phaser.GameObjects.Graphics;
+  private manaRegenTimer: number = 0;
+  private playerLevel: number = PlayerStats.experience.initialLevel;
+  private playerXp: number = 0;
+  private playerNextLevelXp: number = PlayerStats.experience.baseXp;
+  private playerLastDamageTime: number = 0;
 
   // Contrôles
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -15,6 +24,7 @@ export class GameScene extends Phaser.Scene {
   private interactKey!: Phaser.Input.Keyboard.Key;
   private zoomInKey!: Phaser.Input.Keyboard.Key;
   private zoomOutKey!: Phaser.Input.Keyboard.Key;
+  private fireballKey!: Phaser.Input.Keyboard.Key;
 
   // Groupes d'objets
   private enemies!: Phaser.Physics.Arcade.Group;
@@ -27,6 +37,10 @@ export class GameScene extends Phaser.Scene {
   private dialogText!: Phaser.GameObjects.Text;
   private isDialogActive: boolean = false;
   private currentNPC: Phaser.Physics.Arcade.Sprite | null = null;
+
+  // Projectiles
+  private fireballs!: Phaser.Physics.Arcade.Group;
+  private fireballCooldown: number = 0;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -44,9 +58,13 @@ export class GameScene extends Phaser.Scene {
     this.interactKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.zoomInKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.PAGE_UP);
     this.zoomOutKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.PAGE_DOWN);
+    this.fireballKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F);
 
     // Créer une "carte" temporaire (à remplacer par une vraie carte Tiled plus tard)
     this.createTempMap();
+
+    // Créer les animations d'attaque
+    this.createAttackAnimations();
 
     // Créer le joueur
     this.createPlayer();
@@ -63,6 +81,9 @@ export class GameScene extends Phaser.Scene {
     // Créer l'interface utilisateur
     this.createUI();
 
+    // Initialiser les projectiles
+    this.createProjectiles();
+
     // Configurer la caméra
     this.cameras.main.startFollow(this.player, true);
     this.cameras.main.setZoom(2); // Réactivation du zoom pour tester le dialogue
@@ -74,7 +95,7 @@ export class GameScene extends Phaser.Scene {
     this.createDialogBox();
   }
 
-  update(): void {
+  update(time: number, delta: number): void {
     if (!this.player) return;
 
     // Gérer le zoom de la caméra
@@ -102,14 +123,32 @@ export class GameScene extends Phaser.Scene {
       this.tryInteractWithNPC();
     }
 
+    // Gérer le comportement des PNJ
+    this.updateNPCs(time);
+
     // Gérer le mouvement du joueur
     this.handlePlayerMovement();
 
     // Gérer l'attaque du joueur
     this.handlePlayerAttack();
 
+    // Gérer les boules de feu
+    this.handlePlayerFireball(time);
+
+    // Mettre à jour les projectiles
+    this.updateProjectiles();
+
     // Mettre à jour l'interface utilisateur
     this.updateUI();
+
+    // Régénérer le mana au fil du temps (converti en points par seconde)
+    this.manaRegenTimer += delta;
+    if (this.manaRegenTimer >= 1000) { // Régénérer chaque seconde
+      this.manaRegenTimer = 0;
+      if (this.playerMana < this.playerMaxMana) {
+        this.playerMana = Math.min(this.playerMana + PlayerStats.mana.regenRate, this.playerMaxMana);
+      }
+    }
   }
 
   private createTempMap(): void {
@@ -257,15 +296,57 @@ export class GameScene extends Phaser.Scene {
     this.player.anims.play('idle-down');
   }
 
+  private createAttackAnimations(): void {
+    // Animation d'attaque vers le bas
+    this.anims.create({
+      key: 'attack-down',
+      frames: this.anims.generateFrameNumbers('character', { start: 0, end: 4 }),
+      frameRate: 10,
+      repeat: 0
+    });
+
+    // Animation d'attaque vers la gauche
+    this.anims.create({
+      key: 'attack-left',
+      frames: this.anims.generateFrameNumbers('character', { start: 0, end: 4 }),
+      frameRate: 10,
+      repeat: 0
+    });
+
+    // Animation d'attaque vers la droite
+    this.anims.create({
+      key: 'attack-right',
+      frames: this.anims.generateFrameNumbers('character', { start: 0, end: 4 }),
+      frameRate: 10,
+      repeat: 0
+    });
+
+    // Animation d'attaque vers le haut
+    this.anims.create({
+      key: 'attack-up',
+      frames: this.anims.generateFrameNumbers('character', { start: 0, end: 4 }),
+      frameRate: 10,
+      repeat: 0
+    });
+
+    // Anims pour PNJ
+    this.anims.create({
+      key: 'npc-attack-down',
+      frames: this.anims.generateFrameNumbers('character', { start: 0, end: 4 }),
+      frameRate: 10,
+      repeat: 0
+    });
+  }
+
   private createNPCs(): void {
     // Créer un groupe pour les PNJ
     this.npcs = this.physics.add.group();
 
     // Positions fixes des PNJ
     const npcPositions = [
-      { x: 500, y: 200, name: "Villageois", dialog: ["Bonjour voyageur!", "Comment allez-vous aujourd'hui?", "Méfiez-vous des monstres qui rôdent dans les environs."] },
-      { x: 900, y: 600, name: "Marchand", dialog: ["Bienvenue dans notre village!", "J'aurais des objets à vendre, mais le système n'est pas encore implémenté.", "Revenez plus tard!"] },
-      { x: 1200, y: 300, name: "Sage", dialog: ["Les secrets de ce monde sont nombreux...", "Explorez et vous découvrirez des trésors cachés."] }
+      { x: 500, y: 200, name: "Villageois", dialog: ["Bonjour voyageur!", "Comment allez-vous aujourd'hui?", "Méfiez-vous des monstres qui rôdent dans les environs."], canAttack: false },
+      { x: 900, y: 600, name: "Marchand", dialog: ["Bienvenue dans notre village!", "J'aurais des objets à vendre, mais le système n'est pas encore implémenté.", "Revenez plus tard!"], canAttack: false },
+      { x: 1200, y: 300, name: "Garde", dialog: ["Les secrets de ce monde sont nombreux...", "Explorez et vous découvrirez des trésors cachés.", "Je suis là pour protéger le village. Regardez mon épée!"], canAttack: true }
     ];
 
     for (const pos of npcPositions) {
@@ -279,12 +360,20 @@ export class GameScene extends Phaser.Scene {
       npc.setOffset(3, 4); // Décalage pour centrer la hitbox
       
       // Tinter le PNJ en bleu pour le distinguer
-      npc.setTint(0x00aaff);
+      // Les gardes ont une teinte différente (plus vers le violet)
+      if (pos.canAttack) {
+        npc.setTint(0x8844ff);
+      } else {
+        npc.setTint(0x00aaff);
+      }
       
       // Stocker les données du PNJ
       npc.setData('name', pos.name);
       npc.setData('dialog', pos.dialog);
       npc.setData('dialogIndex', 0);
+      npc.setData('canAttack', pos.canAttack);
+      npc.setData('attackCooldown', 0);
+      npc.setData('isAttacking', false);
       
       // Animation statique
       npc.anims.play('idle-down');
@@ -527,6 +616,9 @@ export class GameScene extends Phaser.Scene {
     
     // Collision entre les ennemis et les PNJ
     this.physics.add.collider(this.enemies, this.npcs);
+
+    // Collision entre les boules de feu et les ennemis
+    this.physics.add.overlap(this.fireballs, this.enemies, this.handleFireballEnemyCollision as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback, undefined, this);
   }
 
   private handlePlayerMovement(): void {
@@ -544,7 +636,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    const speed = 100;
+    const speed = PlayerStats.movement.speed;
     let moving = false;
 
     // Mouvement horizontal
@@ -587,6 +679,16 @@ export class GameScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.attackKey) && !this.playerAttacking) {
       this.playerAttacking = true;
 
+      // Jouer l'animation d'attaque dans la direction actuelle
+      const attackAnim = `attack-${this.playerDirection}`;
+      
+      // Vérifier si l'animation est déjà en cours
+      if (this.player.anims.isPlaying && this.player.anims.currentAnim?.key === attackAnim) {
+        return; // Ne pas redémarrer la même animation
+      }
+      
+      this.player.anims.play(attackAnim, true);
+
       // Effet visuel temporaire pour l'attaque
       const attackCircle = this.add.circle(
         this.player.x + this.getAttackOffsetX(),
@@ -594,13 +696,42 @@ export class GameScene extends Phaser.Scene {
         15, 0xffff00, 0.5
       );
 
+      // Créer un effet visuel d'épée
+      const swordEffect = this.add.sprite(
+        this.player.x + this.getAttackOffsetX() * 1.5,
+        this.player.y + this.getAttackOffsetY() * 1.5,
+        'character', 66
+      );
+      
+      // Orienter l'effet d'épée en fonction de la direction
+      if (this.playerDirection === 'left') {
+        swordEffect.setFlipX(true);
+        swordEffect.setAngle(-90);
+      } else if (this.playerDirection === 'right') {
+        swordEffect.setAngle(90);
+      } else if (this.playerDirection === 'up') {
+        swordEffect.setAngle(0);
+      } else { // down
+        swordEffect.setAngle(180);
+      }
+      
+      swordEffect.setScale(1.5);
+      swordEffect.setAlpha(0.7);
+
       // Vérifier les ennemis proches pour les attaquer
       this.attackEnemies();
 
-      // Supprimer l'effet après un court délai
-      this.time.delayedCall(300, () => {
+      // Attendre que l'animation d'attaque soit terminée
+      this.player.once('animationcomplete', () => {
+        // Supprimer les effets visuels
         attackCircle.destroy();
+        swordEffect.destroy();
+        
+        // Permettre au joueur d'attaquer à nouveau
         this.playerAttacking = false;
+        
+        // Revenir à l'animation d'inactivité
+        this.player.anims.play(`idle-${this.playerDirection}`);
       });
     }
   }
@@ -622,7 +753,7 @@ export class GameScene extends Phaser.Scene {
     const enemies = this.enemies.getChildren();
 
     // Définir la portée de l'attaque
-    const attackRange = 35;
+    const attackRange = PlayerStats.attack.melee.range;
 
     // Pour chaque ennemi, vérifier s'il est à portée
     enemies.forEach((enemy) => {
@@ -633,7 +764,7 @@ export class GameScene extends Phaser.Scene {
       );
 
       if (distance < attackRange) {
-        const enemyHealth = enemySprite.getData('health') - 1;
+        const enemyHealth = enemySprite.getData('health') - PlayerStats.attack.melee.damage;
         enemySprite.setData('health', enemyHealth);
 
         // Effet de recul
@@ -651,8 +782,10 @@ export class GameScene extends Phaser.Scene {
           repeat: 2
         });
 
-        // Détruire l'ennemi et sa barre de vie s'il n'a plus de vie
+        // Ajouter de l'expérience au joueur quand il tue un ennemi
         if (enemyHealth <= 0) {
+          this.addPlayerXP(20); // 20 XP par ennemi tué
+          
           const healthBar = enemySprite.getData('healthBar') as Phaser.GameObjects.Graphics;
           if (healthBar) {
             healthBar.destroy();
@@ -669,6 +802,12 @@ export class GameScene extends Phaser.Scene {
 
     // Ne pas gérer les collisions si le joueur est en train d'attaquer
     if (this.playerAttacking) return;
+    
+    // Vérifier le temps d'invincibilité
+    const currentTime = this.time.now;
+    if (currentTime - this.playerLastDamageTime < PlayerStats.combat.invincibilityTime) {
+      return;
+    }
 
     // Appliquer un délai entre les dégâts (pour éviter de prendre des dégâts trop rapidement)
     if (enemySprite.getData('lastAttackTime') && 
@@ -678,6 +817,7 @@ export class GameScene extends Phaser.Scene {
     
     // Enregistrer le moment de l'attaque
     enemySprite.setData('lastAttackTime', this.time.now);
+    this.playerLastDamageTime = currentTime;
 
     // Faire clignoter le joueur pour l'effet d'impact
     this.tweens.add({
@@ -738,6 +878,30 @@ export class GameScene extends Phaser.Scene {
       }
       this.healthBar.fillRect(10 + i * 25, 40, 20, 20);
     }
+    
+    // Mettre à jour la barre de mana
+    this.healthBar.fillStyle(0x000000, 0.5);
+    this.healthBar.fillRect(10, 70, 120, 10);
+    
+    this.healthBar.fillStyle(0x0088ff, 1);
+    this.healthBar.fillRect(10, 70, 120 * (this.playerMana / this.playerMaxMana), 10);
+    
+    // Afficher le niveau du joueur
+    this.healthBar.fillStyle(0x000000, 0.5);
+    this.healthBar.fillRect(10, 90, 120, 20);
+    
+    // Texte pour le niveau
+    const levelText = this.add.text(70, 100, `Niveau ${this.playerLevel}`, {
+      font: '12px Arial',
+      color: '#ffffff'
+    });
+    levelText.setOrigin(0.5, 0.5);
+    levelText.setScrollFactor(0);
+    
+    // Barre d'expérience
+    this.healthBar.fillStyle(0x00ff00, 1);
+    const xpRatio = this.playerXp / this.playerNextLevelXp;
+    this.healthBar.fillRect(10, 90, 120 * xpRatio, 20);
     
     // Mettre à jour la barre de vie du joueur qui suit le joueur
     this.playerHealthBar.clear();
@@ -1013,5 +1177,502 @@ export class GameScene extends Phaser.Scene {
         console.log("Zoom diminué à:", this.cameras.main.zoom);
       }
     }
+  }
+
+  private createProjectiles(): void {
+    // Créer un groupe pour les boules de feu
+    this.fireballs = this.physics.add.group({
+      classType: Phaser.Physics.Arcade.Sprite,
+      maxSize: 10
+    });
+    
+    // Créer une texture pour les boules de feu
+    this.createFireballTexture();
+  }
+  
+  private createFireballTexture(): void {
+    // Créer une texture pour les boules de feu
+    const graphics = this.add.graphics();
+    
+    // Dessiner le centre de la boule de feu (blanc-jaune vif)
+    graphics.fillStyle(0xffffcc, 1);
+    graphics.fillCircle(16, 16, 6);
+    
+    // Dessiner la couche intermédiaire (jaune-orange)
+    graphics.fillStyle(0xffcc00, 0.9);
+    graphics.fillCircle(16, 16, 10);
+    
+    // Dessiner la couche externe (rouge-orange)
+    graphics.fillStyle(0xff7700, 0.7);
+    graphics.fillCircle(16, 16, 14);
+    
+    // Ajouter un effet de lueur
+    graphics.fillStyle(0xff3300, 0.3);
+    graphics.fillCircle(16, 16, 16);
+    
+    // Générer la texture
+    graphics.generateTexture('fireball', 32, 32);
+    graphics.destroy();
+  }
+
+  private handlePlayerFireball(time: number): void {
+    // Vérifier le cooldown
+    if (time < this.fireballCooldown) {
+      return;
+    }
+
+    // Lancer une boule de feu avec la touche F
+    if (Phaser.Input.Keyboard.JustDown(this.fireballKey)) {
+      if (this.playerMana >= PlayerStats.attack.fireball.manaCost) {
+        // Obtenir les vecteurs de direction
+        let dirX = this.getDirectionOffsetX();
+        let dirY = this.getDirectionOffsetY();
+        
+        // Vérifier si une direction valide est détectée
+        if (dirX === 0 && dirY === 0) {
+          // Si aucune direction n'est détectée, utiliser la dernière direction connue du joueur
+          if (this.playerDirection === 'left') {
+            dirX = -1;
+          } else if (this.playerDirection === 'right') {
+            dirX = 1;
+          } else if (this.playerDirection === 'up') {
+            dirY = -1;
+          } else if (this.playerDirection === 'down') {
+            dirY = 1;
+          }
+        }
+        
+        // Coût en mana
+        this.playerMana -= PlayerStats.attack.fireball.manaCost;
+        
+        // Définir le cooldown
+        this.fireballCooldown = time + PlayerStats.attack.fireball.cooldown;
+        
+        // Position initiale de la boule de feu
+        const offsetX = dirX * 20;
+        const offsetY = dirY * 20;
+        const x = this.player.x + offsetX;
+        const y = this.player.y + offsetY;
+        
+        // Créer la boule de feu
+        const fireball = this.fireballs.get(x, y) as Phaser.Physics.Arcade.Sprite;
+        
+        if (fireball) {
+          fireball.setActive(true);
+          fireball.setVisible(true);
+          
+          // Utiliser la texture de boule de feu
+          fireball.setTexture('fireball');
+          fireball.setDisplaySize(PlayerStats.attack.fireball.size, PlayerStats.attack.fireball.size);
+          
+          // Ajouter un effet de lumière
+          const lightCircle = this.add.circle(0, 0, 32, 0xff8800, 0.3);
+          fireball.setData('light', lightCircle);
+          
+          // Configurer la vitesse en fonction de la direction
+          const speed = PlayerStats.attack.fireball.speed;
+          const velocityX = dirX * speed;
+          const velocityY = dirY * speed;
+          
+          // S'assurer que la boule de feu a une vélocité non nulle
+          if (velocityX === 0 && velocityY === 0) {
+            // Si malgré tout on n'a pas de direction, utiliser la direction par défaut (vers le bas)
+            fireball.setVelocity(0, speed);
+            console.log("Direction par défaut utilisée pour la boule de feu");
+          } else {
+            fireball.setVelocity(velocityX, velocityY);
+          }
+          
+          // Définir la durée de vie de la boule de feu
+          fireball.setData('lifespan', PlayerStats.attack.fireball.lifespan);
+          fireball.setData('created', time);
+          fireball.setData('lastX', x);
+          fireball.setData('lastY', y);
+          fireball.setData('stuckCheckTime', time + 300); // Vérifier après 300ms si la boule est bloquée
+          
+          // Ajouter une animation de rotation
+          this.tweens.add({
+            targets: fireball,
+            angle: 360,
+            duration: 1000,
+            repeat: -1,
+            ease: 'Linear'
+          });
+          
+          // Ajouter une animation de pulsation
+          this.tweens.add({
+            targets: fireball,
+            scale: { from: 0.8, to: 1.2 },
+            duration: 300,
+            yoyo: true,
+            repeat: -1
+          });
+          
+          // Effet sonore
+          // this.sound.play('fireball_sound');
+        }
+      } else {
+        // Pas assez de mana - afficher une indication visuelle
+        this.showNotEnoughManaEffect();
+      }
+    }
+  }
+
+  private showNotEnoughManaEffect(): void {
+    // Créer un texte pour indiquer le manque de mana
+    const noManaText = this.add.text(
+      this.player.x,
+      this.player.y - 30,
+      "Pas assez de mana!",
+      {
+        font: 'bold 12px Arial',
+        color: '#0088ff',
+        stroke: '#000000',
+        strokeThickness: 4
+      }
+    );
+    noManaText.setOrigin(0.5);
+    
+    // Faire flotter le texte vers le haut puis disparaître
+    this.tweens.add({
+      targets: noManaText,
+      y: noManaText.y - 20,
+      alpha: 0,
+      duration: 1000,
+      onComplete: () => {
+        noManaText.destroy();
+      }
+    });
+    
+    // Faire clignoter la barre de mana
+    this.tweens.add({
+      targets: this.healthBar,
+      alpha: { from: 1, to: 0.3 },
+      duration: 100,
+      yoyo: true,
+      repeat: 3
+    });
+  }
+
+  private updateProjectiles(): void {
+    // Mettre à jour la position des effets lumineux des boules de feu
+    this.fireballs.getChildren().forEach((fireball) => {
+      const fireballSprite = fireball as Phaser.Physics.Arcade.Sprite;
+      
+      if (!fireballSprite.active) return;
+      
+      // Mettre à jour la position de l'effet lumineux
+      const light = fireballSprite.getData('light') as Phaser.GameObjects.Shape;
+      if (light) {
+        light.setPosition(fireballSprite.x, fireballSprite.y);
+      }
+      
+      // Vérifier la durée de vie
+      const created = fireballSprite.getData('created') as number;
+      const lifespan = fireballSprite.getData('lifespan') as number;
+      
+      // Vérifier si la boule de feu est bloquée (ne se déplace pas)
+      const stuckCheckTime = fireballSprite.getData('stuckCheckTime') as number;
+      if (this.time.now > stuckCheckTime) {
+        const lastX = fireballSprite.getData('lastX') as number;
+        const lastY = fireballSprite.getData('lastY') as number;
+        const distance = Phaser.Math.Distance.Between(lastX, lastY, fireballSprite.x, fireballSprite.y);
+        
+        // Si la boule de feu n'a pas bougé (ou très peu) depuis la dernière vérification
+        if (distance < 5) {
+          console.log("Boule de feu bloquée détectée, suppression...");
+          // Forcer la destruction de la boule de feu
+          if (light) {
+            light.destroy();
+          }
+          fireballSprite.setActive(false);
+          fireballSprite.setVisible(false);
+          if (fireballSprite.body) {
+            fireballSprite.body.enable = false;
+          }
+          return;
+        }
+        
+        // Mettre à jour la dernière position connue et programmer la prochaine vérification
+        fireballSprite.setData('lastX', fireballSprite.x);
+        fireballSprite.setData('lastY', fireballSprite.y);
+        fireballSprite.setData('stuckCheckTime', this.time.now + 300);
+      }
+      
+      if (this.time.now > created + lifespan) {
+        // Supprimer l'effet lumineux
+        if (light) {
+          light.destroy();
+        }
+        
+        // Désactiver la boule de feu
+        fireballSprite.setActive(false);
+        fireballSprite.setVisible(false);
+        if (fireballSprite.body) {
+          fireballSprite.body.enable = false;
+        }
+      }
+    });
+  }
+
+  private handleFireballEnemyCollision(fireball: any, enemy: any): void {
+    const fireballSprite = fireball as Phaser.Physics.Arcade.Sprite;
+    const enemySprite = enemy as Phaser.Physics.Arcade.Sprite;
+    
+    // Supprimer l'effet lumineux
+    const light = fireballSprite.getData('light') as Phaser.GameObjects.Shape;
+    if (light) {
+      light.destroy();
+    }
+    
+    // Désactiver la boule de feu
+    fireballSprite.setActive(false);
+    fireballSprite.setVisible(false);
+    if (fireballSprite.body) {
+      fireballSprite.body.enable = false;
+    }
+    
+    // Endommager l'ennemi
+    const enemyHealth = enemySprite.getData('health') - PlayerStats.attack.fireball.damage;
+    enemySprite.setData('health', enemyHealth);
+    
+    // Créer un effet d'explosion avec des cercles
+    for (let i = 0; i < 8; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Phaser.Math.Between(50, 100);
+      const distance = Phaser.Math.Between(5, 20);
+      
+      const particleX = enemySprite.x + Math.cos(angle) * distance;
+      const particleY = enemySprite.y + Math.sin(angle) * distance;
+      
+      const particle = this.add.circle(particleX, particleY, Phaser.Math.Between(2, 5), 0xff7700);
+      
+      this.tweens.add({
+        targets: particle,
+        x: particleX + Math.cos(angle) * speed,
+        y: particleY + Math.sin(angle) * speed,
+        alpha: 0,
+        scale: 0.5,
+        duration: 500,
+        onComplete: () => {
+          particle.destroy();
+        }
+      });
+    }
+    
+    // Effet de recul
+    const angle = Phaser.Math.Angle.Between(
+      fireballSprite.x, fireballSprite.y,
+      enemySprite.x, enemySprite.y
+    );
+    enemySprite.setVelocity(
+      Math.cos(angle) * PlayerStats.attack.fireball.knockbackForce,
+      Math.sin(angle) * PlayerStats.attack.fireball.knockbackForce
+    );
+    
+    // Effet de clignotement
+    this.tweens.add({
+      targets: enemySprite,
+      alpha: { from: 0.3, to: 1 },
+      duration: 100,
+      repeat: 2
+    });
+    
+    // Ajouter de l'expérience au joueur quand il tue un ennemi
+    if (enemyHealth <= 0) {
+      this.addPlayerXP(20); // 20 XP par ennemi tué
+      
+      const healthBar = enemySprite.getData('healthBar') as Phaser.GameObjects.Graphics;
+      if (healthBar) {
+        healthBar.destroy();
+      }
+      enemySprite.destroy();
+    }
+  }
+
+  private getDirectionOffsetX(): number {
+    switch (this.playerDirection) {
+      case 'left': return -1;
+      case 'right': return 1;
+      default: return 0;
+    }
+  }
+
+  private getDirectionOffsetY(): number {
+    switch (this.playerDirection) {
+      case 'up': return -1;
+      case 'down': return 1;
+      default: return 0;
+    }
+  }
+
+  // Nouvelle méthode pour gérer l'expérience du joueur
+  private addPlayerXP(amount: number): void {
+    this.playerXp += amount;
+    
+    // Vérifier si le joueur monte de niveau
+    if (this.playerXp >= this.playerNextLevelXp) {
+      this.levelUp();
+    }
+  }
+
+  private levelUp(): void {
+    this.playerLevel++;
+    
+    // Calculer l'XP nécessaire pour le niveau suivant
+    this.playerNextLevelXp = PlayerStats.experience.baseXp + 
+                            (this.playerLevel * PlayerStats.experience.xpPerLevel);
+    
+    // Obtenir les statistiques pour le nouveau niveau
+    const levelStats = getStatsByLevel(this.playerLevel);
+    
+    // Mettre à jour les statistiques du joueur
+    this.playerMaxHealth = levelStats.health.maximum;
+    this.playerHealth = this.playerMaxHealth; // Soigner complètement lors d'une montée de niveau
+    
+    this.playerMaxMana = levelStats.mana.maximum;
+    this.playerMana = this.playerMaxMana; // Restaurer complètement le mana
+    
+    // Afficher un message de montée de niveau
+    const levelUpText = this.add.text(
+      this.player.x,
+      this.player.y - 50,
+      "NIVEAU UP!",
+      {
+        font: 'bold 18px Arial',
+        color: '#ffff00',
+        stroke: '#000000',
+        strokeThickness: 4
+      }
+    );
+    levelUpText.setOrigin(0.5);
+    
+    // Animation de montée de niveau
+    this.tweens.add({
+      targets: levelUpText,
+      y: levelUpText.y - 30,
+      alpha: 0,
+      duration: 2000,
+      onComplete: () => {
+        levelUpText.destroy();
+      }
+    });
+    
+    // Effet visuel sur le joueur
+    this.tweens.add({
+      targets: this.player,
+      alpha: 0.8,
+      scale: 1.2,
+      duration: 200,
+      yoyo: true,
+      repeat: 2
+    });
+    
+    // Effet sonore
+    // this.sound.play('level_up_sound');
+  }
+
+  private updateNPCs(time: number): void {
+    // Récupérer tous les PNJ
+    const npcs = this.npcs.getChildren();
+    
+    // Mettre à jour chaque PNJ
+    npcs.forEach((npc) => {
+      const npcSprite = npc as Phaser.Physics.Arcade.Sprite;
+      
+      // Vérifier si le PNJ peut attaquer
+      if (npcSprite.getData('canAttack')) {
+        // Vérifier si le PNJ n'est pas déjà en train d'attaquer
+        if (!npcSprite.getData('isAttacking')) {
+          // Vérifier le cooldown
+          const attackCooldown = npcSprite.getData('attackCooldown') as number;
+          
+          if (time > attackCooldown) {
+            // Faire attaquer le PNJ aléatoirement
+            if (Phaser.Math.Between(0, 100) < 1) { // 1% de chance d'attaquer à chaque frame
+              this.npcAttack(npcSprite, time);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  private npcAttack(npc: Phaser.Physics.Arcade.Sprite, time: number): void {
+    // Vérifier si le PNJ n'est pas déjà en train d'attaquer
+    if (npc.getData('isAttacking')) {
+      return;
+    }
+    
+    // Marquer le PNJ comme étant en train d'attaquer
+    npc.setData('isAttacking', true);
+    
+    // Jouer l'animation d'attaque
+    npc.anims.play('npc-attack-down', true);
+    
+    // Créer un effet visuel d'épée
+    const swordEffect = this.add.sprite(npc.x, npc.y + 20, 'character', 66);
+    swordEffect.setScale(1.5);
+    swordEffect.setAlpha(0.7);
+    
+    // Animation de l'effet d'épée
+    this.tweens.add({
+      targets: swordEffect,
+      alpha: 0,
+      scale: 2,
+      duration: 300,
+      onComplete: () => {
+        swordEffect.destroy();
+      }
+    });
+    
+    // Vérifier si le joueur est à portée pour l'attaque
+    const distance = Phaser.Math.Distance.Between(
+      npc.x, npc.y,
+      this.player.x, this.player.y
+    );
+    
+    if (distance < 50) {
+      // Dégâts au joueur si à portée
+      const currentTime = this.time.now;
+      if (currentTime - this.playerLastDamageTime > PlayerStats.combat.invincibilityTime) {
+        this.playerHealth--;
+        this.playerLastDamageTime = currentTime;
+        
+        // Effet visuel sur le joueur
+        this.tweens.add({
+          targets: this.player,
+          alpha: 0.5,
+          yoyo: true,
+          duration: 100,
+          repeat: 2
+        });
+        
+        // Effet de recul
+        const angle = Phaser.Math.Angle.Between(npc.x, npc.y, this.player.x, this.player.y);
+        this.player.setVelocity(
+          Math.cos(angle) * 200,
+          Math.sin(angle) * 200
+        );
+        
+        // Vérifier si le joueur est mort
+        if (this.playerHealth <= 0) {
+          this.gameOver();
+        }
+      }
+    }
+    
+    // Revenir à l'animation d'inactivité après la fin de l'attaque
+    npc.once('animationcomplete', () => {
+      // S'assurer que l'animation est bien terminée
+      if (npc.anims.currentAnim && npc.anims.currentAnim.key === 'npc-attack-down') {
+        npc.anims.play('idle-down');
+        npc.setData('isAttacking', false);
+        
+        // Définir un cooldown aléatoire entre 3 et 6 secondes
+        const newCooldown = time + Phaser.Math.Between(3000, 6000);
+        npc.setData('attackCooldown', newCooldown);
+      }
+    });
   }
 }

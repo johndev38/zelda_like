@@ -114,13 +114,13 @@ export class PreloadScene extends Phaser.Scene {
         
         this.anims.create({
             key: 'idle-left',
-            frames: [{ key: 'character', frame: 34 }],
+            frames: [{ key: 'character', frame: 51 }],
             frameRate: 1
         });
         
         this.anims.create({
             key: 'idle-up',
-            frames: [{ key: 'character', frame: 51 }],
+            frames: [{ key: 'character', frame: 34 }],
             frameRate: 1
         });
         
@@ -135,14 +135,14 @@ export class PreloadScene extends Phaser.Scene {
         
         this.anims.create({
             key: 'enemy-walk-right',
-            frames: this.anims.generateFrameNumbers('character', { start: 17, end: 20 }),
+            frames: this.anims.generateFrameNumbers('character', { start: 16, end: 20 }),
             frameRate: 6,
             repeat: -1
         });
         
         this.anims.create({
             key: 'enemy-walk-left',
-            frames: this.anims.generateFrameNumbers('character', { start: 51, end: 54 }),
+            frames: this.anims.generateFrameNumbers('character', { start: 52, end: 55 }),
             frameRate: 6,
             repeat: -1
         });
@@ -168,7 +168,7 @@ export class PreloadScene extends Phaser.Scene {
         
         this.anims.create({
             key: 'enemy-idle-left',
-            frames: [{ key: 'character', frame: 34 }],
+            frames: [{ key: 'character', frame: 1 }],
             frameRate: 1
         });
         
