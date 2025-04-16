@@ -13,6 +13,8 @@ export class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private attackKey!: Phaser.Input.Keyboard.Key;
   private interactKey!: Phaser.Input.Keyboard.Key;
+  private zoomInKey!: Phaser.Input.Keyboard.Key;
+  private zoomOutKey!: Phaser.Input.Keyboard.Key;
 
   // Groupes d'objets
   private enemies!: Phaser.Physics.Arcade.Group;
@@ -40,6 +42,8 @@ export class GameScene extends Phaser.Scene {
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.attackKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.interactKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    this.zoomInKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.PAGE_UP);
+    this.zoomOutKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.PAGE_DOWN);
 
     // Créer une "carte" temporaire (à remplacer par une vraie carte Tiled plus tard)
     this.createTempMap();
@@ -61,7 +65,7 @@ export class GameScene extends Phaser.Scene {
 
     // Configurer la caméra
     this.cameras.main.startFollow(this.player, true);
-    // this.cameras.main.setZoom(3); // Zoom temporairement désactivé pour tester l'affichage du texte
+    this.cameras.main.setZoom(2); // Réactivation du zoom pour tester le dialogue
 
     // Configurer les collisions
     this.setupCollisions();
@@ -73,10 +77,16 @@ export class GameScene extends Phaser.Scene {
   update(): void {
     if (!this.player) return;
 
+    // Gérer le zoom de la caméra
+    this.handleCameraZoom();
+
     // Gérer le dialogue interactif
-    if (this.isDialogActive) {
+    if (this.isDialogActive && this.currentNPC) {
       // Si un dialogue est actif, le joueur ne peut pas bouger
       this.player.setVelocity(0, 0);
+      
+      // Mettre à jour la position du dialogue
+      this.updateDialogPosition();
       
       // Fermer le dialogue avec la touche d'interaction
       if (Phaser.Input.Keyboard.JustDown(this.interactKey)) {
@@ -282,13 +292,36 @@ export class GameScene extends Phaser.Scene {
       // Ajouter le PNJ au groupe
       this.npcs.add(npc);
 
-      // Créer un indicateur d'interaction
-      const interactIcon = this.add.text(pos.x, pos.y - 30, "E", {
-        font: '8px Arial',
-        color: '#ffffff'
-      }).setOrigin(0.5).setDepth(2).setVisible(false);
+      // Création d'un conteneur pour l'icône d'interaction
+      const interactContainer = this.add.container(pos.x, pos.y - 25);
+      interactContainer.setDepth(2);
+      interactContainer.setVisible(false);
       
-      npc.setData('interactIcon', interactIcon);
+      // Fond pour le bouton d'interaction
+      const background = this.add.circle(0, 0, 10, 0x000000, 0.7);
+      background.setStrokeStyle(2, 0xffffff);
+      
+      // Texte
+      const interactIcon = this.add.text(0, 0, "E", {
+        font: 'bold 12px Arial',
+        color: '#ffffff',
+      }).setOrigin(0.5);
+      
+      // Animation de pulsation pour attirer l'attention
+      this.tweens.add({
+        targets: background,
+        scaleX: 1.2,
+        scaleY: 1.2,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+        duration: 500
+      });
+      
+      // Ajouter au conteneur
+      interactContainer.add([background, interactIcon]);
+      
+      npc.setData('interactIcon', interactContainer);
     }
   }
 
@@ -505,6 +538,11 @@ export class GameScene extends Phaser.Scene {
 
     // Réinitialiser la vélocité
     this.player.setVelocity(0);
+
+    // Si dialogue actif, ne pas permettre au joueur de bouger
+    if (this.isDialogActive) {
+      return;
+    }
 
     const speed = 100;
     let moving = false;
@@ -768,71 +806,70 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createDialogBox(): void {
-    // Créer des éléments directement sans container pour éviter des problèmes
+    // Créer un container vide pour stocker les éléments de dialogue
+    this.dialogBox = this.add.container(0, 0);
+    this.dialogBox.setDepth(10000);
     
-    // Fond de la boîte de dialogue
-    const dialogBackground = this.add.rectangle(
-      400, // Position X fixe (au lieu de centerX)
-      500, // Position Y fixe (au lieu de height - 100)
-      600, // Largeur fixe (au lieu de width * 0.8)
-      150,
-      0x000000,
-      0.9
-    );
-    dialogBackground.setStrokeStyle(4, 0xffffff);
-    dialogBackground.setScrollFactor(0);
-    dialogBackground.setDepth(9999);
-    dialogBackground.setVisible(false);
+    // Créer l'arrière-plan de la bulle de dialogue
+    const dialogBackground = this.add.graphics();
     
-    // Texte de dialogue avec couleur très contrastée
-    this.dialogText = this.add.text(
-      400, // Position X fixe
-      500, // Position Y fixe
-      "TEXTE DE TEST - BONJOUR",
-      {
-        font: 'bold 28px Arial',
-        color: '#ffff00', // Jaune vif
-        align: 'center',
-        wordWrap: { width: 580 } // Largeur fixe
-      }
-    );
-    this.dialogText.setOrigin(0.5);
-    this.dialogText.setScrollFactor(0);
-    this.dialogText.setDepth(10000);
+    // Dessiner le rectangle arrondi principal
+    dialogBackground.fillStyle(0xffffff, 0.9);
+    dialogBackground.lineStyle(2, 0x000000, 1);
+    dialogBackground.fillRoundedRect(0, 0, 320, 100, 16);
+    dialogBackground.strokeRoundedRect(0, 0, 320, 100, 16);
+    
+    // Dessiner le triangle de la pointe
+    dialogBackground.fillStyle(0xffffff, 0.9);
+    dialogBackground.lineStyle(2, 0x000000, 1);
+    dialogBackground.fillTriangle(150, 100, 170, 100, 160, 115);
+    dialogBackground.strokeTriangle(150, 100, 170, 100, 160, 115);
+    
+    // Créer une texture à partir de l'arrière-plan
+    dialogBackground.generateTexture('dialogBubble', 320, 120);
+    dialogBackground.destroy();
+    
+    // Créer le sprite d'arrière-plan
+    const bubbleSprite = this.add.sprite(0, 0, 'dialogBubble');
+    bubbleSprite.setOrigin(0.5, 0.95);  // Ajuster l'origine pour inclure la pointe
+    bubbleSprite.setVisible(false);
+    
+    // Le texte sera créé dynamiquement au-dessus du PNJ lors de l'interaction
+    this.dialogText = this.add.text(0, -50, "", {
+      font: 'bold 18px Arial',
+      color: '#000000',
+      align: 'center',
+      padding: { x: 15, y: 10 },
+      wordWrap: { width: 280 },
+      lineSpacing: 6
+    });
+    this.dialogText.setOrigin(0.5, 0.5);
     this.dialogText.setVisible(false);
     
-    // Instruction pour continuer
-    const continueText = this.add.text(
-      400, // Position X fixe
-      560, // Position Y fixe
-      "Appuyez sur E pour continuer",
-      {
-        font: 'bold 20px Arial',
-        color: '#ff00ff', // Rose vif
-        align: 'center'
-      }
-    );
-    continueText.setOrigin(0.5);
-    continueText.setScrollFactor(0);
-    continueText.setDepth(10000);
-    continueText.setVisible(false);
+    // Ajouter les éléments au container
+    this.dialogBox.add([bubbleSprite, this.dialogText]);
     
-    // Stocker les références pour pouvoir les afficher/cacher facilement
-    this.dialogBox = this.add.container(0, 0);
-    // Attention: Le container lui-même n'est pas utilisé pour la position, 
-    // juste pour regrouper les références
-    this.dialogBox.add([dialogBackground, this.dialogText, continueText]);
+    // Stocker une référence au sprite de bulle
+    this.dialogText.setData('bubble', bubbleSprite);
+    
+    // Assurer que le texte est toujours visible et lisible
     this.dialogBox.setDepth(10000);
-    this.dialogBox.setScrollFactor(0); // Le container doit aussi avoir setScrollFactor(0)
-    this.dialogBox.setVisible(false);
+  }
+
+  private updateDialogPosition(): void {
+    if (!this.currentNPC || !this.isDialogActive) return;
     
-    // Stocker les références individuelles pour un accès plus facile
-    // (Ces setData ne sont probablement plus nécessaires mais ne gênent pas)
-    dialogBackground.setData('isDialogBackground', true);
-    this.dialogText.setData('isDialogText', true);
-    continueText.setData('isContinueText', true);
+    // Obtenir la position du PNJ dans le monde
+    const npcX = this.currentNPC.x;
+    const npcY = this.currentNPC.y - 40; // Décalage au-dessus du PNJ
     
-    console.log("Nouvelle boîte de dialogue créée (sans zoom caméra)");
+    // Mettre à jour la position du texte pour qu'il soit au-dessus du PNJ
+    this.dialogBox.setPosition(npcX, npcY);
+    
+    // Ajuster la taille du texte en fonction du zoom de la caméra
+    // Plus le zoom est grand, plus le texte doit être petit pour être lisible
+    const scale = 1 / this.cameras.main.zoom;
+    this.dialogBox.setScale(scale);
   }
 
   private startDialog(npc: Phaser.Physics.Arcade.Sprite): void {
@@ -844,38 +881,32 @@ export class GameScene extends Phaser.Scene {
     const dialogIndex = npc.getData('dialogIndex') as number;
     const npcName = npc.getData('name') as string;
     
-    // Créer un texte de dialogue plus simple et direct
-    const dialogContent = `${npcName}:\n\n${dialogLines[dialogIndex]}`;
+    // Créer un texte de dialogue concis
+    const dialogContent = `${npcName}:\n${dialogLines[dialogIndex]}\n\n[E]`;
+    
+    // Obtenir la bulle de dialogue
+    const bubble = this.dialogText.getData('bubble') as Phaser.GameObjects.Sprite;
+    
+    // Positionner le dialogue au-dessus du PNJ
+    this.dialogBox.setPosition(npc.x, npc.y - 40);
+    
+    // Mettre à jour le texte
     this.dialogText.setText(dialogContent);
     
-    // S'assurer que tous les éléments de dialogue sont visibles individuellement
-    this.dialogBox.getAll().forEach(element => {
-      (element as Phaser.GameObjects.GameObject & { setVisible: (visible: boolean) => void }).setVisible(true);
+    // Afficher la bulle et le texte
+    bubble.setVisible(true);
+    this.dialogText.setVisible(true);
+    
+    // Ajouter une animation pour faire apparaître le texte
+    this.tweens.add({
+      targets: this.dialogBox,
+      y: npc.y - 50,
+      alpha: { from: 0.7, to: 1 },
+      duration: 300,
+      ease: 'Sine.easeOut'
     });
     
-    // Rendre la boîte de dialogue (le container) visible
-    this.dialogBox.setVisible(true);
-    
     console.log("Dialogue démarré:", dialogContent);
-    console.log("Visibilité de la boîte de dialogue:", this.dialogBox.visible);
-    console.log("Visibilité du texte:", this.dialogText.visible);
-    
-    // Suppression du texte de test direct
-    /*
-    const testText = this.add.text(
-      this.cameras.main.centerX,
-      100,
-      "TEXTE DE TEST DIRECT",
-      {
-        font: 'bold 32px Arial',
-        color: '#ff0000',
-        backgroundColor: '#ffffff'
-      }
-    );
-    testText.setOrigin(0.5);
-    testText.setScrollFactor(0);
-    testText.setDepth(20000);
-    */
   }
 
   private closeDialog(): void {
@@ -891,15 +922,25 @@ export class GameScene extends Phaser.Scene {
     
     // Si c'est la première ligne, fermer le dialogue
     if (dialogIndex === 0) {
-      // Cacher tous les éléments de dialogue individuellement
-      this.dialogBox.getAll().forEach(element => {
-        (element as Phaser.GameObjects.GameObject & { setVisible: (visible: boolean) => void }).setVisible(false);
-      });
+      // Obtenir la position actuelle pour l'animation de fermeture
+      const npcY = this.currentNPC.y - 30;
       
-      // Cacher la boîte de dialogue
-      this.dialogBox.setVisible(false);
-      this.isDialogActive = false;
-      this.currentNPC = null;
+      // Animation de fermeture
+      this.tweens.add({
+        targets: this.dialogBox,
+        alpha: 0,
+        y: npcY,
+        duration: 200,
+        onComplete: () => {
+          // Cacher la bulle et le texte
+          const bubble = this.dialogText.getData('bubble') as Phaser.GameObjects.Sprite;
+          bubble.setVisible(false);
+          this.dialogText.setVisible(false);
+          
+          this.isDialogActive = false;
+          this.currentNPC = null;
+        }
+      });
     } else {
       // Sinon, afficher la ligne suivante
       this.startDialog(this.currentNPC);
@@ -918,8 +959,8 @@ export class GameScene extends Phaser.Scene {
     // Cacher tous les indicateurs d'interaction
     npcs.forEach((npc) => {
       const npcSprite = npc as Phaser.Physics.Arcade.Sprite;
-      const interactIcon = npcSprite.getData('interactIcon') as Phaser.GameObjects.Text;
-      interactIcon.setVisible(false);
+      const interactContainer = npcSprite.getData('interactIcon') as Phaser.GameObjects.Container;
+      interactContainer.setVisible(false);
     });
     
     // Trouver le PNJ le plus proche dans la portée d'interaction
@@ -935,8 +976,8 @@ export class GameScene extends Phaser.Scene {
       
       // Si le PNJ est à portée, afficher l'indicateur d'interaction
       if (distance < interactRange) {
-        const interactIcon = npcSprite.getData('interactIcon') as Phaser.GameObjects.Text;
-        interactIcon.setVisible(true);
+        const interactContainer = npcSprite.getData('interactIcon') as Phaser.GameObjects.Container;
+        interactContainer.setVisible(true);
         
         // Mise à jour du PNJ le plus proche
         if (distance < closestDistance) {
@@ -951,6 +992,26 @@ export class GameScene extends Phaser.Scene {
       // Debug - vérifier que l'interaction est détectée
       console.log("Interaction avec PNJ: " + (closestNPC as Phaser.Physics.Arcade.Sprite).getData('name'));
       this.startDialog(closestNPC);
+    }
+  }
+
+  private handleCameraZoom(): void {
+    // Zoom in (Page Up)
+    if (Phaser.Input.Keyboard.JustDown(this.zoomInKey)) {
+      const currentZoom = this.cameras.main.zoom;
+      if (currentZoom < 4) {
+        this.cameras.main.setZoom(currentZoom + 0.5);
+        console.log("Zoom augmenté à:", this.cameras.main.zoom);
+      }
+    }
+    
+    // Zoom out (Page Down)
+    if (Phaser.Input.Keyboard.JustDown(this.zoomOutKey)) {
+      const currentZoom = this.cameras.main.zoom;
+      if (currentZoom > 1) {
+        this.cameras.main.setZoom(currentZoom - 0.5);
+        console.log("Zoom diminué à:", this.cameras.main.zoom);
+      }
     }
   }
 }
