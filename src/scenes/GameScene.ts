@@ -101,39 +101,46 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Ajouter des maisons avec les tuiles du tileset Overworld
-    // La maison fait 4 tuiles de large et 5 tuiles de haut
     const housePositions = [
       { x: 400, y: 300 }, { x: 800, y: 500 }, { x: 1100, y: 700 }
     ];
 
-    // Indice de la tuile en haut à gauche de la maison (coin toit) dans le tileset
-    const houseTopLeftFrame = 1; 
-    const houseWidthInTiles = 5;
-    const houseHeightInTiles = 4;
-    const spritesheetWidth = 45; // Largeur du tileset en tuiles (43 tuiles au total)
+    // Dimensions du tileset
+    const spritesheetWidth = 40; // Largeur totale du tileset en tuiles
+    
+    // Coordonnées des tuiles de la maison dans le tileset (indices x,y)
+    const houseTopLeft = { x: 6, y: 0 }; // Tuile en haut à gauche
+    const houseBottomRight = { x: 10, y: 4 }; // Tuile en bas à droite
+    
+    // Calcul des dimensions et de l'index de départ
+    const houseWidthInTiles = houseBottomRight.x - houseTopLeft.x + 1;
+    const houseHeightInTiles = houseBottomRight.y - houseTopLeft.y + 1;
+    const houseTopLeftFrame = houseTopLeft.y * spritesheetWidth + houseTopLeft.x;
     
     // Taille d'une tuile après mise à l'échelle
     const baseTileSize = 16;
-    const scaleFactor = 2;
+    const scaleFactor = 1;
     const finalTileSize = baseTileSize * scaleFactor;
     
     for (const pos of housePositions) {
       // Créer un groupe pour contenir toutes les parties de la maison
       const house = this.add.container(pos.x, pos.y);
       
-      // Ajouter les 20 tuiles de la maison
+      // Ajouter les tuiles de la maison
       for (let dy = 0; dy < houseHeightInTiles; dy++) {
         for (let dx = 0; dx < houseWidthInTiles; dx++) {
           // Calculer l'index de la tuile actuelle dans le spritesheet
-          const currentFrameIndex = houseTopLeftFrame + dx + (dy * spritesheetWidth);
+          const tileX = houseTopLeft.x + dx;
+          const tileY = houseTopLeft.y + dy;
+          const currentFrameIndex = tileY * spritesheetWidth + tileX;
           
           // Calculer la position relative de la tuile dans le container
           // Ajuster pour que le centre du container (pos.x, pos.y) soit à la base de la maison
-          const tileX = (dx - houseWidthInTiles / 2 + 0.5) * finalTileSize;
-          const tileY = (dy - houseHeightInTiles + 1) * finalTileSize; // Positionne par rapport au bas
+          const tileX_pos = (dx - houseWidthInTiles / 2 + 0.5) * finalTileSize;
+          const tileY_pos = (dy - houseHeightInTiles + 1) * finalTileSize; // Positionne par rapport au bas
           
           // Créer le sprite pour cette tuile
-          const tileSprite = this.add.sprite(tileX, tileY, 'overworld', currentFrameIndex);
+          const tileSprite = this.add.sprite(tileX_pos, tileY_pos, 'overworld', currentFrameIndex);
           tileSprite.setScale(scaleFactor);
           tileSprite.setOrigin(0.5); // Centrer l'origine de chaque tuile
           
@@ -142,7 +149,7 @@ export class GameScene extends Phaser.Scene {
         }
       }
       
-      // Ajouter une collision pour toute la maison (la hitbox englobe les 4x5 tuiles)
+      // Ajouter une collision pour toute la maison
       const hitboxWidth = houseWidthInTiles * finalTileSize;
       const hitboxHeight = houseHeightInTiles * finalTileSize;
       const hitbox = this.physics.add.existing(
@@ -151,7 +158,6 @@ export class GameScene extends Phaser.Scene {
       );
       
       // Définir la profondeur pour que la maison apparaisse correctement
-      // Utiliser la position Y du bas de la maison pour un meilleur tri
       house.setDepth(pos.y + (finalTileSize / 2));
     }
 
