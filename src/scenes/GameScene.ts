@@ -4,19 +4,27 @@ export class GameScene extends Phaser.Scene {
   // Propriétés du joueur
   private player!: Phaser.Physics.Arcade.Sprite;
   private playerHealth: number = 3;
+  private playerMaxHealth: number = 5;
   private playerAttacking: boolean = false;
   private playerDirection: string = 'down';
+  private playerHealthBar!: Phaser.GameObjects.Graphics;
 
   // Contrôles
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private attackKey!: Phaser.Input.Keyboard.Key;
+  private interactKey!: Phaser.Input.Keyboard.Key;
 
   // Groupes d'objets
   private enemies!: Phaser.Physics.Arcade.Group;
   private items!: Phaser.Physics.Arcade.Group;
+  private npcs!: Phaser.Physics.Arcade.Group;
 
   // Interface utilisateur
   private healthBar!: Phaser.GameObjects.Graphics;
+  private dialogBox!: Phaser.GameObjects.Container;
+  private dialogText!: Phaser.GameObjects.Text;
+  private isDialogActive: boolean = false;
+  private currentNPC: Phaser.Physics.Arcade.Sprite | null = null;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -31,12 +39,16 @@ export class GameScene extends Phaser.Scene {
     // Initialiser les contrôles
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.attackKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.interactKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
 
     // Créer une "carte" temporaire (à remplacer par une vraie carte Tiled plus tard)
     this.createTempMap();
 
     // Créer le joueur
     this.createPlayer();
+
+    // Créer les PNJ
+    this.createNPCs();
 
     // Créer les ennemis
     this.createEnemies();
@@ -49,14 +61,36 @@ export class GameScene extends Phaser.Scene {
 
     // Configurer la caméra
     this.cameras.main.startFollow(this.player, true);
-    this.cameras.main.setZoom(3); // Zoom plus important pour le pixel art
+    // this.cameras.main.setZoom(3); // Zoom temporairement désactivé pour tester l'affichage du texte
 
     // Configurer les collisions
     this.setupCollisions();
+
+    // Créer la boîte de dialogue (invisible par défaut)
+    this.createDialogBox();
   }
 
   update(): void {
     if (!this.player) return;
+
+    // Gérer le dialogue interactif
+    if (this.isDialogActive) {
+      // Si un dialogue est actif, le joueur ne peut pas bouger
+      this.player.setVelocity(0, 0);
+      
+      // Fermer le dialogue avec la touche d'interaction
+      if (Phaser.Input.Keyboard.JustDown(this.interactKey)) {
+        console.log("Touche E pressée pendant le dialogue");
+        this.closeDialog();
+      }
+      return;
+    }
+
+    // Gérer l'interaction avec les PNJ
+    if (Phaser.Input.Keyboard.JustDown(this.interactKey)) {
+      console.log("Touche E pressée pour interaction");
+      this.tryInteractWithNPC();
+    }
 
     // Gérer le mouvement du joueur
     this.handlePlayerMovement();
@@ -205,91 +239,201 @@ export class GameScene extends Phaser.Scene {
     this.player.setOffset(3, 4); // Décalage pour centrer la hitbox
     this.player.setDepth(1);
 
+    // Barre de vie du joueur qui suit le joueur
+    this.playerHealthBar = this.add.graphics();
+    this.playerHealthBar.setDepth(2);
+
     // Jouer l'animation d'inactivité par défaut (veillez à créer les animations ailleurs)
     this.player.anims.play('idle-down');
+  }
+
+  private createNPCs(): void {
+    // Créer un groupe pour les PNJ
+    this.npcs = this.physics.add.group();
+
+    // Positions fixes des PNJ
+    const npcPositions = [
+      { x: 500, y: 200, name: "Villageois", dialog: ["Bonjour voyageur!", "Comment allez-vous aujourd'hui?", "Méfiez-vous des monstres qui rôdent dans les environs."] },
+      { x: 900, y: 600, name: "Marchand", dialog: ["Bienvenue dans notre village!", "J'aurais des objets à vendre, mais le système n'est pas encore implémenté.", "Revenez plus tard!"] },
+      { x: 1200, y: 300, name: "Sage", dialog: ["Les secrets de ce monde sont nombreux...", "Explorez et vous découvrirez des trésors cachés."] }
+    ];
+
+    for (const pos of npcPositions) {
+      // Créer le sprite du PNJ en utilisant le même spritesheet que le joueur
+      const npc = this.physics.add.sprite(pos.x, pos.y, 'character');
+      
+      // Configuration du PNJ
+      npc.setImmovable(true);
+      npc.setCollideWorldBounds(true);
+      npc.setSize(10, 10); // Hitbox plus petite que le sprite
+      npc.setOffset(3, 4); // Décalage pour centrer la hitbox
+      
+      // Tinter le PNJ en bleu pour le distinguer
+      npc.setTint(0x00aaff);
+      
+      // Stocker les données du PNJ
+      npc.setData('name', pos.name);
+      npc.setData('dialog', pos.dialog);
+      npc.setData('dialogIndex', 0);
+      
+      // Animation statique
+      npc.anims.play('idle-down');
+      
+      // Ajouter le PNJ au groupe
+      this.npcs.add(npc);
+
+      // Créer un indicateur d'interaction
+      const interactIcon = this.add.text(pos.x, pos.y - 30, "E", {
+        font: '8px Arial',
+        color: '#ffffff'
+      }).setOrigin(0.5).setDepth(2).setVisible(false);
+      
+      npc.setData('interactIcon', interactIcon);
+    }
   }
 
   private createEnemies(): void {
     // Créer un groupe pour les ennemis
     this.enemies = this.physics.add.group();
 
-    // Ajouter des ennemis à des positions fixes
+    // Positions fixes des ennemis
     const enemyPositions = [
       { x: 300, y: 500 }, { x: 700, y: 300 }, { x: 900, y: 800 },
       { x: 1300, y: 400 }, { x: 500, y: 900 }
     ];
 
     for (const pos of enemyPositions) {
-      // Créer le sprite invisible pour la physique
-      const enemy = this.physics.add.sprite(pos.x, pos.y, 'enemies');
-      enemy.setVisible(false);
-      enemy.setSize(32, 32);
+      // Créer le sprite de l'ennemi en utilisant le même spritesheet que le joueur
+      const enemy = this.physics.add.sprite(pos.x, pos.y, 'character');
+      
+      // Configuration de l'ennemi
       enemy.setCollideWorldBounds(true);
-      enemy.setData('health', 2);
-      enemy.setData('detectionRange', 150); // Définir une portée de détection
-      enemy.setData('aggroState', false); // État d'agressivité
-
-      // Créer un rectangle rouge visible
-      const enemyRect = this.add.rectangle(pos.x, pos.y, 16, 16, 0xcc0000);
-
-      // Lier le rectangle au sprite
-      enemy.setData('visual', enemyRect);
-
-      // Mettre à jour la position du rectangle en fonction du sprite
-      this.events.on('update', () => {
-        if (enemy.active) {
-          enemyRect.setPosition(enemy.x, enemy.y);
-          
-          // Vérifier si le joueur est à portée de détection
-          if (this.player && enemy.getData('health') > 0) {
-            const distance = Phaser.Math.Distance.Between(
-              this.player.x, this.player.y,
-              enemy.x, enemy.y
-            );
-            
-            // Si le joueur est à portée, entrer en mode agression
-            if (distance < enemy.getData('detectionRange')) {
-              enemy.setData('aggroState', true);
-              
-              // Calculer la direction vers le joueur et se déplacer
-              const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
-              const speed = 60;
-              enemy.setVelocity(
-                Math.cos(angle) * speed,
-                Math.sin(angle) * speed
-              );
-              
-              // Faire clignoter l'ennemi quand il est agressif
-              if (!enemy.getData('blinking')) {
-                enemy.setData('blinking', true);
-                this.tweens.add({
-                  targets: enemyRect,
-                  fillColor: { from: 0xcc0000, to: 0xff0000 },
-                  duration: 500,
-                  yoyo: true,
-                  repeat: -1
-                });
-              }
-            } else if (enemy.getData('aggroState')) {
-              // Réinitialiser l'état si le joueur s'éloigne
-              enemy.setData('aggroState', false);
-              enemy.setVelocity(0, 0);
-              
-              // Arrêter le clignotement
-              if (enemy.getData('blinking')) {
-                enemy.setData('blinking', false);
-                this.tweens.killTweensOf(enemyRect);
-                enemyRect.fillColor = 0xcc0000;
-              }
-            }
-          }
-        } else {
-          enemyRect.setVisible(false);
-        }
-      });
-
+      enemy.setSize(10, 10); // Hitbox plus petite que le sprite
+      enemy.setOffset(3, 4); // Décalage pour centrer la hitbox
+      
+      // Tinter l'ennemi en rouge pour le distinguer du joueur
+      enemy.setTint(0xff0000);
+      
+      // Initialiser les propriétés de l'ennemi
+      enemy.setData('maxHealth', 3);
+      enemy.setData('health', 3);
+      enemy.setData('direction', 'down');
+      enemy.setData('detectionRange', 150);
+      enemy.setData('aggroState', false);
+      enemy.setData('speed', 40);
+      enemy.setData('lastDirectionChange', 0);
+      enemy.setData('directionChangeInterval', Phaser.Math.Between(1000, 3000));
+      
+      // Créer une barre de vie pour l'ennemi
+      const healthBar = this.add.graphics();
+      healthBar.setDepth(2);
+      enemy.setData('healthBar', healthBar);
+      
+      // Démarrer avec une animation idle
+      enemy.anims.play('enemy-idle-down');
+      
       // Ajouter l'ennemi au groupe
       this.enemies.add(enemy);
+      
+      // Mettre à jour le comportement de l'ennemi à chaque frame
+      this.events.on('update', () => {
+        if (enemy.active && enemy.getData('health') > 0) {
+          this.updateEnemyBehavior(enemy);
+          this.updateEnemyHealthBar(enemy);
+        }
+      });
+    }
+  }
+
+  /**
+   * Met à jour le comportement d'un ennemi à chaque frame
+   * @param enemy L'ennemi à mettre à jour
+   */
+  private updateEnemyBehavior(enemy: Phaser.Physics.Arcade.Sprite): void {
+    const time = this.time.now;
+    const player = this.player;
+    let direction = enemy.getData('direction');
+    let isAggro = enemy.getData('aggroState');
+    
+    if (!player) return;
+    
+    // Calculer la distance et l'angle vers le joueur
+    const distance = Phaser.Math.Distance.Between(
+      enemy.x, enemy.y,
+      player.x, player.y
+    );
+    const angle = Phaser.Math.Angle.Between(
+      enemy.x, enemy.y,
+      player.x, player.y
+    );
+    
+    // Déterminer si l'ennemi doit poursuivre le joueur
+    if (distance < enemy.getData('detectionRange')) {
+      isAggro = true;
+      enemy.setData('aggroState', true);
+      
+      // Déterminer la direction en fonction de l'angle vers le joueur
+      const angleInDegrees = Phaser.Math.RadToDeg(angle);
+      
+      if (angleInDegrees >= -45 && angleInDegrees < 45) {
+        direction = 'right';
+      } else if (angleInDegrees >= 45 && angleInDegrees < 135) {
+        direction = 'down';
+      } else if (angleInDegrees >= -135 && angleInDegrees < -45) {
+        direction = 'up';
+      } else {
+        direction = 'left';
+      }
+      
+      enemy.setData('direction', direction);
+      
+      // Déplacer l'ennemi vers le joueur
+      const speed = enemy.getData('speed');
+      enemy.setVelocity(
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed
+      );
+      
+      // Jouer l'animation de marche correspondante
+      enemy.anims.play(`enemy-walk-${direction}`, true);
+    } 
+    // Si l'ennemi n'est pas en état d'agression
+    else {
+      // Vérifier s'il faut changer de direction
+      const lastChange = enemy.getData('lastDirectionChange');
+      const changeInterval = enemy.getData('directionChangeInterval');
+      
+      if (isAggro) {
+        // Si l'ennemi était agressif mais ne l'est plus, il s'arrête
+        isAggro = false;
+        enemy.setData('aggroState', false);
+        enemy.setVelocity(0, 0);
+        enemy.anims.play(`enemy-idle-${direction}`);
+      } 
+      else if (time - lastChange > changeInterval) {
+        // Changer de direction de temps en temps
+        const directions = ['up', 'down', 'left', 'right'];
+        direction = directions[Phaser.Math.Between(0, 3)];
+        enemy.setData('direction', direction);
+        enemy.setData('lastDirectionChange', time);
+        enemy.setData('directionChangeInterval', Phaser.Math.Between(1000, 3000));
+        
+        const speed = enemy.getData('speed') * 0.5; // Mouvement plus lent en mode patrouille
+        
+        // Déplacer l'ennemi dans la nouvelle direction
+        if (direction === 'up') {
+          enemy.setVelocity(0, -speed);
+        } else if (direction === 'down') {
+          enemy.setVelocity(0, speed);
+        } else if (direction === 'left') {
+          enemy.setVelocity(-speed, 0);
+        } else if (direction === 'right') {
+          enemy.setVelocity(speed, 0);
+        }
+        
+        // Jouer l'animation correspondante
+        enemy.anims.play(`enemy-walk-${direction}`, true);
+      }
     }
   }
 
@@ -342,8 +486,14 @@ export class GameScene extends Phaser.Scene {
     // Collision entre le joueur et les objets
     this.physics.add.overlap(this.player, this.items, this.handlePlayerItemCollision as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback, undefined, this);
 
+    // Collision entre le joueur et les PNJ
+    this.physics.add.collider(this.player, this.npcs);
+
     // Collision entre les ennemis eux-mêmes
     this.physics.add.collider(this.enemies, this.enemies);
+    
+    // Collision entre les ennemis et les PNJ
+    this.physics.add.collider(this.enemies, this.npcs);
   }
 
   private handlePlayerMovement(): void {
@@ -455,22 +605,19 @@ export class GameScene extends Phaser.Scene {
           Math.sin(angle) * 200
         );
 
-        // Effet de clignotement sur le visuel
-        const visual = enemySprite.getData('visual') as Phaser.GameObjects.Rectangle;
-        if (visual) {
-          this.tweens.add({
-            targets: visual,
-            alpha: { from: 0.5, to: 1 },
-            duration: 100,
-            repeat: 2
-          });
-        }
+        // Effet de clignotement
+        this.tweens.add({
+          targets: enemySprite,
+          alpha: { from: 0.5, to: 1 },
+          duration: 100,
+          repeat: 2
+        });
 
-        // Détruire l'ennemi s'il n'a plus de vie
+        // Détruire l'ennemi et sa barre de vie s'il n'a plus de vie
         if (enemyHealth <= 0) {
-          const visual = enemySprite.getData('visual') as Phaser.GameObjects.Rectangle;
-          if (visual) {
-            visual.destroy();
+          const healthBar = enemySprite.getData('healthBar') as Phaser.GameObjects.Graphics;
+          if (healthBar) {
+            healthBar.destroy();
           }
           enemySprite.destroy();
         }
@@ -523,7 +670,7 @@ export class GameScene extends Phaser.Scene {
 
     if (itemType === 'heart') {
       // Augmenter la santé jusqu'à un maximum de 5
-      this.playerHealth = Math.min(this.playerHealth + 1, 5);
+      this.playerHealth = Math.min(this.playerHealth + 1, this.playerMaxHealth);
 
       const visual = itemSprite.getData('visual') as Phaser.GameObjects.Shape;
       if (visual) {
@@ -540,7 +687,37 @@ export class GameScene extends Phaser.Scene {
     this.healthBar.fillRect(10, 10, 120, 20);
     
     this.healthBar.fillStyle(0xff0000, 1);
-    this.healthBar.fillRect(10, 10, 120 * (this.playerHealth / 5), 20);
+    this.healthBar.fillRect(10, 10, 120 * (this.playerHealth / this.playerMaxHealth), 20);
+    
+    // Dessiner les icônes de cœur
+    for (let i = 0; i < this.playerMaxHealth; i++) {
+      if (i < this.playerHealth) {
+        // Cœur plein
+        this.healthBar.fillStyle(0xff0000, 1);
+      } else {
+        // Cœur vide
+        this.healthBar.fillStyle(0x555555, 1);
+      }
+      this.healthBar.fillRect(10 + i * 25, 40, 20, 20);
+    }
+    
+    // Mettre à jour la barre de vie du joueur qui suit le joueur
+    this.playerHealthBar.clear();
+    
+    // Position de la barre de vie (au-dessus du joueur)
+    const barX = this.player.x - 15;
+    const barY = this.player.y - 20;
+    const barWidth = 30;
+    const barHeight = 4;
+    
+    // Fond de la barre (gris foncé)
+    this.playerHealthBar.fillStyle(0x333333, 0.8);
+    this.playerHealthBar.fillRect(barX, barY, barWidth, barHeight);
+    
+    // Barre de vie (vert)
+    const healthPercentage = this.playerHealth / this.playerMaxHealth;
+    this.playerHealthBar.fillStyle(0x00ff00, 1);
+    this.playerHealthBar.fillRect(barX, barY, barWidth * healthPercentage, barHeight);
   }
 
   private gameOver(): void {
@@ -565,5 +742,215 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(3000, () => {
       this.scene.start('MainMenuScene');
     });
+  }
+
+  private updateEnemyHealthBar(enemy: Phaser.Physics.Arcade.Sprite): void {
+    const healthBar = enemy.getData('healthBar') as Phaser.GameObjects.Graphics;
+    const health = enemy.getData('health');
+    const maxHealth = enemy.getData('maxHealth');
+    
+    healthBar.clear();
+    
+    // Position de la barre de vie (au-dessus de l'ennemi)
+    const barX = enemy.x - 15;
+    const barY = enemy.y - 20;
+    const barWidth = 30;
+    const barHeight = 4;
+    
+    // Fond de la barre (gris foncé)
+    healthBar.fillStyle(0x333333, 0.8);
+    healthBar.fillRect(barX, barY, barWidth, barHeight);
+    
+    // Barre de vie (rouge)
+    const healthPercentage = health / maxHealth;
+    healthBar.fillStyle(0xff0000, 1);
+    healthBar.fillRect(barX, barY, barWidth * healthPercentage, barHeight);
+  }
+
+  private createDialogBox(): void {
+    // Créer des éléments directement sans container pour éviter des problèmes
+    
+    // Fond de la boîte de dialogue
+    const dialogBackground = this.add.rectangle(
+      400, // Position X fixe (au lieu de centerX)
+      500, // Position Y fixe (au lieu de height - 100)
+      600, // Largeur fixe (au lieu de width * 0.8)
+      150,
+      0x000000,
+      0.9
+    );
+    dialogBackground.setStrokeStyle(4, 0xffffff);
+    dialogBackground.setScrollFactor(0);
+    dialogBackground.setDepth(9999);
+    dialogBackground.setVisible(false);
+    
+    // Texte de dialogue avec couleur très contrastée
+    this.dialogText = this.add.text(
+      400, // Position X fixe
+      500, // Position Y fixe
+      "TEXTE DE TEST - BONJOUR",
+      {
+        font: 'bold 28px Arial',
+        color: '#ffff00', // Jaune vif
+        align: 'center',
+        wordWrap: { width: 580 } // Largeur fixe
+      }
+    );
+    this.dialogText.setOrigin(0.5);
+    this.dialogText.setScrollFactor(0);
+    this.dialogText.setDepth(10000);
+    this.dialogText.setVisible(false);
+    
+    // Instruction pour continuer
+    const continueText = this.add.text(
+      400, // Position X fixe
+      560, // Position Y fixe
+      "Appuyez sur E pour continuer",
+      {
+        font: 'bold 20px Arial',
+        color: '#ff00ff', // Rose vif
+        align: 'center'
+      }
+    );
+    continueText.setOrigin(0.5);
+    continueText.setScrollFactor(0);
+    continueText.setDepth(10000);
+    continueText.setVisible(false);
+    
+    // Stocker les références pour pouvoir les afficher/cacher facilement
+    this.dialogBox = this.add.container(0, 0);
+    // Attention: Le container lui-même n'est pas utilisé pour la position, 
+    // juste pour regrouper les références
+    this.dialogBox.add([dialogBackground, this.dialogText, continueText]);
+    this.dialogBox.setDepth(10000);
+    this.dialogBox.setScrollFactor(0); // Le container doit aussi avoir setScrollFactor(0)
+    this.dialogBox.setVisible(false);
+    
+    // Stocker les références individuelles pour un accès plus facile
+    // (Ces setData ne sont probablement plus nécessaires mais ne gênent pas)
+    dialogBackground.setData('isDialogBackground', true);
+    this.dialogText.setData('isDialogText', true);
+    continueText.setData('isContinueText', true);
+    
+    console.log("Nouvelle boîte de dialogue créée (sans zoom caméra)");
+  }
+
+  private startDialog(npc: Phaser.Physics.Arcade.Sprite): void {
+    this.isDialogActive = true;
+    this.currentNPC = npc;
+    
+    // Récupérer les données de dialogue du PNJ
+    const dialogLines = npc.getData('dialog') as string[];
+    const dialogIndex = npc.getData('dialogIndex') as number;
+    const npcName = npc.getData('name') as string;
+    
+    // Créer un texte de dialogue plus simple et direct
+    const dialogContent = `${npcName}:\n\n${dialogLines[dialogIndex]}`;
+    this.dialogText.setText(dialogContent);
+    
+    // S'assurer que tous les éléments de dialogue sont visibles individuellement
+    this.dialogBox.getAll().forEach(element => {
+      (element as Phaser.GameObjects.GameObject & { setVisible: (visible: boolean) => void }).setVisible(true);
+    });
+    
+    // Rendre la boîte de dialogue (le container) visible
+    this.dialogBox.setVisible(true);
+    
+    console.log("Dialogue démarré:", dialogContent);
+    console.log("Visibilité de la boîte de dialogue:", this.dialogBox.visible);
+    console.log("Visibilité du texte:", this.dialogText.visible);
+    
+    // Suppression du texte de test direct
+    /*
+    const testText = this.add.text(
+      this.cameras.main.centerX,
+      100,
+      "TEXTE DE TEST DIRECT",
+      {
+        font: 'bold 32px Arial',
+        color: '#ff0000',
+        backgroundColor: '#ffffff'
+      }
+    );
+    testText.setOrigin(0.5);
+    testText.setScrollFactor(0);
+    testText.setDepth(20000);
+    */
+  }
+
+  private closeDialog(): void {
+    if (!this.currentNPC) return;
+    
+    // Récupérer les données de dialogue du PNJ
+    const dialogLines = this.currentNPC.getData('dialog') as string[];
+    let dialogIndex = this.currentNPC.getData('dialogIndex') as number;
+    
+    // Passer à la ligne de dialogue suivante
+    dialogIndex = (dialogIndex + 1) % dialogLines.length;
+    this.currentNPC.setData('dialogIndex', dialogIndex);
+    
+    // Si c'est la première ligne, fermer le dialogue
+    if (dialogIndex === 0) {
+      // Cacher tous les éléments de dialogue individuellement
+      this.dialogBox.getAll().forEach(element => {
+        (element as Phaser.GameObjects.GameObject & { setVisible: (visible: boolean) => void }).setVisible(false);
+      });
+      
+      // Cacher la boîte de dialogue
+      this.dialogBox.setVisible(false);
+      this.isDialogActive = false;
+      this.currentNPC = null;
+    } else {
+      // Sinon, afficher la ligne suivante
+      this.startDialog(this.currentNPC);
+    }
+  }
+
+  private tryInteractWithNPC(): void {
+    if (this.isDialogActive) return;
+    
+    // Récupérer tous les PNJ
+    const npcs = this.npcs.getChildren();
+    
+    // Distance d'interaction
+    const interactRange = 50;
+    
+    // Cacher tous les indicateurs d'interaction
+    npcs.forEach((npc) => {
+      const npcSprite = npc as Phaser.Physics.Arcade.Sprite;
+      const interactIcon = npcSprite.getData('interactIcon') as Phaser.GameObjects.Text;
+      interactIcon.setVisible(false);
+    });
+    
+    // Trouver le PNJ le plus proche dans la portée d'interaction
+    let closestNPC: Phaser.Physics.Arcade.Sprite | null = null;
+    let closestDistance = interactRange;
+    
+    npcs.forEach((npc) => {
+      const npcSprite = npc as Phaser.Physics.Arcade.Sprite;
+      const distance = Phaser.Math.Distance.Between(
+        this.player.x, this.player.y,
+        npcSprite.x, npcSprite.y
+      );
+      
+      // Si le PNJ est à portée, afficher l'indicateur d'interaction
+      if (distance < interactRange) {
+        const interactIcon = npcSprite.getData('interactIcon') as Phaser.GameObjects.Text;
+        interactIcon.setVisible(true);
+        
+        // Mise à jour du PNJ le plus proche
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestNPC = npcSprite;
+        }
+      }
+    });
+    
+    // Si un PNJ est à portée, démarrer le dialogue
+    if (closestNPC) {
+      // Debug - vérifier que l'interaction est détectée
+      console.log("Interaction avec PNJ: " + (closestNPC as Phaser.Physics.Arcade.Sprite).getData('name'));
+      this.startDialog(closestNPC);
+    }
   }
 }

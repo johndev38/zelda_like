@@ -123,5 +123,59 @@ export class PreloadScene extends Phaser.Scene {
             frames: [{ key: 'character', frame: 51 }],
             frameRate: 1
         });
+        
+        // Animations pour les ennemis (mêmes animations que le joueur avec préfixe "enemy-")
+        // On utilise le même spritesheet que le joueur
+        this.anims.create({
+            key: 'enemy-walk-down',
+            frames: this.anims.generateFrameNumbers('character', { start: 0, end: 3 }),
+            frameRate: 6,
+            repeat: -1
+        });
+        
+        this.anims.create({
+            key: 'enemy-walk-right',
+            frames: this.anims.generateFrameNumbers('character', { start: 17, end: 20 }),
+            frameRate: 6,
+            repeat: -1
+        });
+        
+        this.anims.create({
+            key: 'enemy-walk-left',
+            frames: this.anims.generateFrameNumbers('character', { start: 51, end: 54 }),
+            frameRate: 6,
+            repeat: -1
+        });
+        
+        this.anims.create({
+            key: 'enemy-walk-up',
+            frames: this.anims.generateFrameNumbers('character', { start: 34, end: 37 }),
+            frameRate: 6,
+            repeat: -1
+        });
+        
+        this.anims.create({
+            key: 'enemy-idle-down',
+            frames: [{ key: 'character', frame: 0 }],
+            frameRate: 1
+        });
+        
+        this.anims.create({
+            key: 'enemy-idle-right',
+            frames: [{ key: 'character', frame: 17 }],
+            frameRate: 1
+        });
+        
+        this.anims.create({
+            key: 'enemy-idle-left',
+            frames: [{ key: 'character', frame: 34 }],
+            frameRate: 1
+        });
+        
+        this.anims.create({
+            key: 'enemy-idle-up',
+            frames: [{ key: 'character', frame: 51 }],
+            frameRate: 1
+        });
     }
 } 
