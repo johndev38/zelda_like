@@ -30,6 +30,7 @@ export class GameScene extends Phaser.Scene {
   private enemies!: Phaser.Physics.Arcade.Group;
   private items!: Phaser.Physics.Arcade.Group;
   private npcs!: Phaser.Physics.Arcade.Group;
+  private staticObjects!: Phaser.Physics.Arcade.StaticGroup; // Groupe pour les objets statiques
 
   // Interface utilisateur
   private healthBar!: Phaser.GameObjects.Graphics;
@@ -93,6 +94,9 @@ export class GameScene extends Phaser.Scene {
 
     // Créer la boîte de dialogue (invisible par défaut)
     this.createDialogBox();
+    
+    // Activer le débogage visuel des hitboxes pour développement
+    this.showDebugHitboxes();
   }
 
   update(time: number, delta: number): void {
@@ -158,6 +162,9 @@ export class GameScene extends Phaser.Scene {
     // Créer une carte fixe avec un fond vert
     const mapWidth = 1600;
     const mapHeight = 1200;
+    
+    // Créer un groupe pour les objets statiques
+    this.staticObjects = this.physics.add.staticGroup();
     
     // Fond de la carte
     this.add.rectangle(0, 0, mapWidth, mapHeight, 0x66aa55).setOrigin(0, 0);
@@ -233,49 +240,79 @@ export class GameScene extends Phaser.Scene {
     const widthInTiles = bottomRight.x - topLeft.x + 1;
     const heightInTiles = bottomRight.y - topLeft.y + 1;
     
-    // Créer un conteneur pour regrouper toutes les tuiles
-    const container = this.add.container(x, y + (options.offsetY || 0));
+    // Position visuelle Y de l'objet
+    const visualY = y + (options.offsetY || 0);
     
-    // Ajouter les tuiles au conteneur
+    // Créer un conteneur pour regrouper toutes les tuiles
+    const container = this.add.container(x, visualY);
+    
+    // Ajouter les tuiles au conteneur (pour l'aspect visuel)
     for (let dy = 0; dy < heightInTiles; dy++) {
       for (let dx = 0; dx < widthInTiles; dx++) {
-        // Calculer les coordonnées de la tuile actuelle dans le tileset
         const tileX = topLeft.x + dx;
         const tileY = topLeft.y + dy;
-        
-        // Calculer l'index de la tuile dans le spritesheet
         const frameIndex = tileY * spritesheetWidth + tileX;
-        
-        // Calculer la position relative de la tuile dans le conteneur
         const tileX_pos = (dx - widthInTiles / 2 + 0.5) * finalTileSize;
         const tileY_pos = (dy - heightInTiles + 0.5) * finalTileSize;
-        
-        // Créer le sprite pour cette tuile
         const tileSprite = this.add.sprite(tileX_pos, tileY_pos, 'overworld', frameIndex);
         tileSprite.setScale(scale);
         tileSprite.setOrigin(0.5);
-        
-        // Ajouter la tuile au conteneur
         container.add(tileSprite);
       }
     }
     
-    // Ajouter une hitbox pour les collisions
-    const hitboxWidth = widthInTiles * finalTileSize;
-    const hitboxHeight = heightInTiles * finalTileSize;
+    // --- Gestion de la Hitbox Physique --- 
     
-    this.physics.add.existing(
-      new Phaser.GameObjects.Rectangle(
-        this,
-        x,
-        y + (options.offsetY || 0),
-        hitboxWidth,
-        hitboxHeight
-      ),
-      true // Objet statique
-    );
+    // Créer une Zone invisible pour porter le corps physique
+    // Placer la Zone à la position de base (x, y) qui sert d'ancre
+    const zoneWidth = widthInTiles * finalTileSize;
+    const zoneHeight = heightInTiles * finalTileSize;
+    const zone = this.add.zone(x, y, zoneWidth, zoneHeight);
     
-    // Définir la profondeur pour le tri visuel correct
+    // Ajouter la zone au groupe statique
+    this.staticObjects.add(zone);
+    
+    // Récupérer le corps physique de la zone
+    const body = zone.body as Phaser.Physics.Arcade.StaticBody;
+    
+    // Activer le corps physique (peut être désactivé par défaut pour les zones)
+    body.enable = true;
+    
+    // Déterminer le type d'objet
+    const isTree = topLeft.y >= 16; // Les arbres commencent à y=16 dans le tileset
+    const isHouse = topLeft.x === 6 && topLeft.y === 0 && bottomRight.x === 10 && bottomRight.y === 4;
+    
+    // Variables pour la taille et le décalage du corps physique
+    let bodyWidth, bodyHeight, bodyOffsetX, bodyOffsetY;
+    
+    if (isTree) {
+      // Arbre: Hitbox sur le tronc (bas, centré)
+      bodyWidth = finalTileSize * 2; // Tronc plus étroit
+      bodyHeight = finalTileSize * 2 ; // Bas du tronc
+      bodyOffsetX = (zoneWidth - bodyWidth) / 2; // Centrer horizontalement par rapport à la zone
+      bodyOffsetY = zoneHeight -  1.5 * bodyHeight; // Placer en bas de la zone (pas d'offset visuel)
+    } else if (isHouse) {
+      // Maison: Hitbox sur la base visible
+      bodyWidth = zoneWidth;
+      bodyHeight = zoneHeight; // 70% de la hauteur
+      bodyOffsetX = 0;
+      // Aligner le haut de la hitbox avec le haut du visuel (qui a un offset)
+      bodyOffsetY = zoneHeight - 1.75 * bodyHeight; 
+    } else {
+      // Autres objets: Hitbox sur 80% de la hauteur, en bas
+      bodyWidth = zoneWidth;
+      bodyHeight = zoneHeight * 0.8;
+      bodyOffsetX = 0;
+      bodyOffsetY = zoneHeight - bodyHeight; // Placer en bas de la zone (pas d'offset visuel)
+    }
+    
+    // Appliquer la taille et le décalage calculés au corps physique
+    body.setSize(bodyWidth, bodyHeight);
+    body.setOffset(bodyOffsetX, bodyOffsetY);
+    
+    // --- Fin Gestion Hitbox --- 
+    
+    // Définir la profondeur du conteneur visuel pour le tri
     container.setDepth(y);
     
     return container;
@@ -605,6 +642,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setupCollisions(): void {
+    // Collision entre le joueur et les objets statiques (arbres, maisons, etc.)
+    this.physics.add.collider(this.player, this.staticObjects);
+    
     // Collision entre le joueur et les ennemis
     this.physics.add.collider(this.player, this.enemies, this.handlePlayerEnemyCollision as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback, undefined, this);
 
@@ -619,9 +659,15 @@ export class GameScene extends Phaser.Scene {
     
     // Collision entre les ennemis et les PNJ
     this.physics.add.collider(this.enemies, this.npcs);
+    
+    // Collision entre les ennemis et les objets statiques
+    this.physics.add.collider(this.enemies, this.staticObjects);
 
     // Collision entre les boules de feu et les ennemis
     this.physics.add.overlap(this.fireballs, this.enemies, this.handleFireballEnemyCollision as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback, undefined, this);
+    
+    // Collision entre les boules de feu et les objets statiques
+    this.physics.add.collider(this.fireballs, this.staticObjects, this.handleFireballWallCollision as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback, undefined, this);
   }
 
   private handlePlayerMovement(): void {
@@ -1500,6 +1546,53 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Gère la collision d'une boule de feu avec un objet statique comme un mur
+   */
+  private handleFireballWallCollision(fireball: any, wall: any): void {
+    const fireballSprite = fireball as Phaser.Physics.Arcade.Sprite;
+    
+    // Supprimer l'effet lumineux
+    const light = fireballSprite.getData('light') as Phaser.GameObjects.Shape;
+    if (light) {
+      light.destroy();
+    }
+    
+    // Désactiver la boule de feu
+    fireballSprite.setActive(false);
+    fireballSprite.setVisible(false);
+    if (fireballSprite.body) {
+      fireballSprite.body.enable = false;
+    }
+    
+    // Supprimer complètement la boule de feu du groupe
+    this.fireballs.remove(fireballSprite, true, true);
+    
+    // Effet visuel pour la collision avec le mur
+    for (let i = 0; i < 5; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Phaser.Math.Between(30, 60);
+      const distance = Phaser.Math.Between(2, 10);
+      
+      const particleX = fireballSprite.x + Math.cos(angle) * distance;
+      const particleY = fireballSprite.y + Math.sin(angle) * distance;
+      
+      const particle = this.add.circle(particleX, particleY, Phaser.Math.Between(1, 3), 0xff5500);
+      
+      this.tweens.add({
+        targets: particle,
+        x: particleX + Math.cos(angle) * speed,
+        y: particleY + Math.sin(angle) * speed,
+        alpha: 0,
+        scale: 0.1,
+        duration: 300,
+        onComplete: () => {
+          particle.destroy();
+        }
+      });
+    }
+  }
+
   private getDirectionOffsetX(): number {
     switch (this.playerDirection) {
       case 'left': return -1;
@@ -1707,5 +1800,13 @@ export class GameScene extends Phaser.Scene {
     if (this.time.now % 60 === 0) {
       console.log(`Boules de feu - Total: ${totalCount}, Actives: ${activeCount}, Inactives: ${inactiveCount}`);
     }
+  }
+
+  /**
+   * Affiche les hitboxes des objets pour le débogage
+   */
+  private showDebugHitboxes(): void {
+    // Activer le débogage visuel des collisions
+    this.physics.world.createDebugGraphic();
   }
 }
