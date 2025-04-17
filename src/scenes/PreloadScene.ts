@@ -33,19 +33,20 @@ export class PreloadScene extends Phaser.Scene {
             frameWidth: 16,  // Taille d'une frame en largeur
             frameHeight: 32  // Taille d'une frame en hauteur
         });
+
+        this.load.spritesheet('attaquant', 'assets/images/character.png', {
+            frameWidth: 32,  // Taille d'une frame en largeur
+            frameHeight: 32  // Taille d'une frame en hauteur
+        });
+        this.load.spritesheet('mage', 'assets/images/mage.png', {
+            frameWidth: 16,  // Taille d'une frame en largeur
+            frameHeight: 16  // Taille d'une frame en hauteur
+        });
         
-        // Essayons plusieurs chemins différents pour le fichier overworld.png
-        try {
-            this.load.spritesheet('overworld', 'assets/images/overworld.png', {
-                frameWidth: 16,
-                frameHeight: 16
-            });
-        } catch (error) {
-            console.log("Erreur lors du chargement du spritesheet overworld:", error);
-        }
-        
-        // Utiliser une image simple pour l'arbre comme solution de secours
-        this.load.image('tree', 'assets/images/log.png');
+        this.load.spritesheet('overworld', 'assets/images/overworld.png', {
+            frameWidth: 16,
+            frameHeight: 16
+        });
         
     }
 

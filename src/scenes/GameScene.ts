@@ -340,7 +340,7 @@ export class GameScene extends Phaser.Scene {
     // Animation d'attaque vers le bas
     this.anims.create({
       key: 'attack-down',
-      frames: this.anims.generateFrameNumbers('character', { start: 0, end: 4 }),
+      frames: this.anims.generateFrameNumbers('attaquant', { start: 32, end: 35 }),
       frameRate: 10,
       repeat: 0
     });
@@ -348,23 +348,31 @@ export class GameScene extends Phaser.Scene {
     // Animation d'attaque vers la gauche
     this.anims.create({
       key: 'attack-left',
-      frames: this.anims.generateFrameNumbers('character', { start: 0, end: 4 }),
+      frames: this.anims.generateFrameNumbers('attaquant', { start: 56, end: 59   }),
       frameRate: 10,
       repeat: 0
     });
 
     // Animation d'attaque vers la droite
+    // this.anims.create({
+    //   key: 'attack-right',
+    //   frames: this.anims.generateFrameNumbers('mage', { start: 0, end: 0}),
+    //   frameRate: 10,
+    //   repeat: 0
+    // });
+
     this.anims.create({
       key: 'attack-right',
-      frames: this.anims.generateFrameNumbers('character', { start: 0, end: 4 }),
+      frames: this.anims.generateFrameNumbers('attaquant', { start: 48, end: 51 }),
       frameRate: 10,
       repeat: 0
     });
 
+
     // Animation d'attaque vers le haut
     this.anims.create({
       key: 'attack-up',
-      frames: this.anims.generateFrameNumbers('character', { start: 0, end: 4 }),
+      frames: this.anims.generateFrameNumbers('attaquant', {  start: 40, end: 43 }),
       frameRate: 10,
       repeat: 0
     });
