@@ -137,6 +137,9 @@ export class GameScene extends Phaser.Scene {
 
     // Mettre à jour les projectiles
     this.updateProjectiles();
+    
+    // Afficher des informations de débogage sur les boules de feu
+    this.debugFireballs();
 
     // Mettre à jour l'interface utilisateur
     this.updateUI();
@@ -1183,7 +1186,7 @@ export class GameScene extends Phaser.Scene {
     // Créer un groupe pour les boules de feu
     this.fireballs = this.physics.add.group({
       classType: Phaser.Physics.Arcade.Sprite,
-      maxSize: 10
+      maxSize: 30  // Augmenté de 10 à 30 pour éviter d'atteindre la limite
     });
     
     // Créer une texture pour les boules de feu
@@ -1390,6 +1393,8 @@ export class GameScene extends Phaser.Scene {
           if (fireballSprite.body) {
             fireballSprite.body.enable = false;
           }
+          // Supprimer complètement la boule de feu du groupe
+          this.fireballs.remove(fireballSprite, true, true);
           return;
         }
         
@@ -1411,6 +1416,8 @@ export class GameScene extends Phaser.Scene {
         if (fireballSprite.body) {
           fireballSprite.body.enable = false;
         }
+        // Supprimer complètement la boule de feu du groupe
+        this.fireballs.remove(fireballSprite, true, true);
       }
     });
   }
@@ -1431,6 +1438,9 @@ export class GameScene extends Phaser.Scene {
     if (fireballSprite.body) {
       fireballSprite.body.enable = false;
     }
+    
+    // Supprimer complètement la boule de feu du groupe
+    this.fireballs.remove(fireballSprite, true, true);
     
     // Endommager l'ennemi
     const enemyHealth = enemySprite.getData('health') - PlayerStats.attack.fireball.damage;
@@ -1674,5 +1684,28 @@ export class GameScene extends Phaser.Scene {
         npc.setData('attackCooldown', newCooldown);
       }
     });
+  }
+
+  // Méthode de débogage pour afficher l'état des boules de feu
+  private debugFireballs(): void {
+    // Compter le nombre de boules de feu actives et inactives
+    let activeCount = 0;
+    let inactiveCount = 0;
+    
+    this.fireballs.getChildren().forEach(fireball => {
+      if (fireball.active) {
+        activeCount++;
+      } else {
+        inactiveCount++;
+      }
+    });
+    
+    // Afficher le nombre total d'objets dans le groupe
+    const totalCount = this.fireballs.getLength();
+    
+    // Log toutes les 60 frames (environ une fois par seconde)
+    if (this.time.now % 60 === 0) {
+      console.log(`Boules de feu - Total: ${totalCount}, Actives: ${activeCount}, Inactives: ${inactiveCount}`);
+    }
   }
 }
