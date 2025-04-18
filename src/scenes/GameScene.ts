@@ -354,19 +354,19 @@ export class GameScene extends Phaser.Scene {
     });
 
     // Animation d'attaque vers la droite
-    // this.anims.create({
-    //   key: 'attack-right',
-    //   frames: this.anims.generateFrameNumbers('mage', { start: 0, end: 0}),
-    //   frameRate: 10,
-    //   repeat: 0
-    // });
-
     this.anims.create({
       key: 'attack-right',
-      frames: this.anims.generateFrameNumbers('attaquant', { start: 48, end: 51 }),
+      frames: this.anims.generateFrameNumbers('mage', { start: 6, end: 8}),
       frameRate: 10,
       repeat: 0
     });
+
+    // this.anims.create({
+    //   key: 'attack-right',
+    //   frames: this.anims.generateFrameNumbers('attaquant', { start: 48, end: 51 }),
+    //   frameRate: 10,
+    //   repeat: 0
+    // });
 
 
     // Animation d'attaque vers le haut
