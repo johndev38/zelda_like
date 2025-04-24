@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { PlayerStats, getStatsByLevel } from '../config/PlayerStats';
+import { LLMAgentService, NPCContext } from '../ai/LLMAgentService';
 
 export class GameScene extends Phaser.Scene {
   // Propriétés du joueur
@@ -43,8 +44,13 @@ export class GameScene extends Phaser.Scene {
   private fireballs!: Phaser.Physics.Arcade.Group;
   private fireballCooldown: number = 0;
 
+  private llmService: LLMAgentService;
+  
   constructor() {
     super({ key: 'GameScene' });
+    // Créer une instance du service LLM pour les tests
+    console.log("==== CRÉATION DU LLMSERVICE DANS GAME SCENE ====");
+    this.llmService = new LLMAgentService();
   }
 
   preload(): void {
@@ -53,6 +59,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
+    console.log("==== MÉTHODE CREATE DE GAME SCENE APPELÉE ====");
+    alert("DÉMARRAGE DU JEU - Vérifiez la console (F12)");
+    
     // Initialiser les contrôles
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.attackKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
@@ -97,6 +106,27 @@ export class GameScene extends Phaser.Scene {
     
     // Activer le débogage visuel des hitboxes pour développement
     this.showDebugHitboxes();
+    
+    // Test immédiat du LLM après 1 seconde
+    this.time.delayedCall(1000, this.testLLMConnection, [], this);
+    
+    // Texte d'aide pour montrer qu'on peut tester
+    const helpText = this.add.text(10, this.sys.game.canvas.height - 60, 
+        'T: Tester connexion LLM', 
+        { fontFamily: 'Arial', fontSize: '14px', color: '#ffffff', backgroundColor: '#000000' });
+    helpText.setScrollFactor(0);
+    
+    // Ajouter touche pour tester la connexion LLM
+    this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.T).on('down', () => {
+      console.log("Touche T pressée - Test LLM");
+      this.testLLMConnection();
+    });
+    
+    // Ajouter la touche R pour forcer le mouvement de tous les PNJ
+    this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R).on('down', () => {
+      console.log("--- TOUCHE R PRESSÉE ---");
+      this.forceAllNPCsToMove();
+    });
   }
 
   update(time: number, delta: number): void {
@@ -127,7 +157,7 @@ export class GameScene extends Phaser.Scene {
       this.tryInteractWithNPC();
     }
 
-    // Gérer le comportement des PNJ
+    // Gérer le comportement des PNJ (version originale)
     this.updateNPCs(time);
 
     // Gérer le mouvement du joueur
@@ -1097,26 +1127,65 @@ export class GameScene extends Phaser.Scene {
     this.isDialogActive = true;
     this.currentNPC = npc;
     
-    // Récupérer les données de dialogue du PNJ
-    const dialogLines = npc.getData('dialog') as string[];
-    const dialogIndex = npc.getData('dialogIndex') as number;
+    // Récupérer les données de base du PNJ
     const npcName = npc.getData('name') as string;
     
-    // Créer un texte de dialogue concis
-    const dialogContent = `${npcName}:\n${dialogLines[dialogIndex]}\n\n[E]`;
-    
-    // Obtenir la bulle de dialogue
+    // Message temporaire pendant le chargement
+    this.dialogText.setText(`${npcName}:\nAttente réponse LLM...`);
     const bubble = this.dialogText.getData('bubble') as Phaser.GameObjects.Sprite;
+    bubble.setVisible(true);
+    this.dialogText.setVisible(true);
     
     // Positionner le dialogue au-dessus du PNJ
     this.dialogBox.setPosition(npc.x, npc.y - 40);
     
-    // Mettre à jour le texte
-    this.dialogText.setText(dialogContent);
+    // Toujours générer un nouveau dialogue
+    console.log("Demande de dialogue au LLM pour", npcName);
     
-    // Afficher la bulle et le texte
-    bubble.setVisible(true);
-    this.dialogText.setVisible(true);
+    // Préparer le contexte pour le LLM
+    const dialogContext = {
+      id: npcName,
+      type: "dialogue_npc", // Précision sur le type de requête
+      x: npc.x,
+      y: npc.y,
+      health: 100,
+      player: {
+        x: this.player.x,
+        y: this.player.y,
+        distance: Phaser.Math.Distance.Between(npc.x, npc.y, this.player.x, this.player.y)
+      },
+      nearbyNPCs: [],
+      visibleObstacles: [],
+      lastAction: null,
+      scene: this,
+      canAttack: npc.getData('canAttack') || false,
+      instructions: "Génère une phrase de dialogue spontanée pour ce PNJ qui parle au joueur. Réponds UNIQUEMENT avec la phrase, sans préfixe ni format particulier."
+    };
+    
+    // Demander un dialogue au LLM
+    this.llmService.getNPCAction(dialogContext)
+      .then(action => {
+        console.log("Réponse brute du LLM:", action);
+        
+        // Utiliser directement la réponse du LLM comme dialogue
+        let newDialog = action.trim();
+        
+        // S'assurer qu'il y a du contenu
+        if (!newDialog || newDialog.length < 2) {
+          newDialog = "Bonjour aventurier! Comment puis-je t'aider aujourd'hui?";
+        }
+        
+        // Afficher le dialogue complet
+        const dialogContent = `${npcName}:\n${newDialog}\n\n[E pour continuer]`;
+        this.dialogText.setText(dialogContent);
+        console.log("Dialogue affiché:", dialogContent);
+      })
+      .catch(error => {
+        console.error("Erreur LLM pour dialogue:", error);
+        const fallbackDialog = "Bonjour aventurier! Je suis content de te voir.";
+        const dialogContent = `${npcName}:\n${fallbackDialog}\n\n[E pour continuer]`;
+        this.dialogText.setText(dialogContent);
+      });
     
     // Ajouter une animation pour faire apparaître le texte
     this.tweens.add({
@@ -1126,46 +1195,37 @@ export class GameScene extends Phaser.Scene {
       duration: 300,
       ease: 'Sine.easeOut'
     });
-    
-    console.log("Dialogue démarré:", dialogContent);
   }
 
   private closeDialog(): void {
     if (!this.currentNPC) return;
     
-    // Récupérer les données de dialogue du PNJ
-    const dialogLines = this.currentNPC.getData('dialog') as string[];
-    let dialogIndex = this.currentNPC.getData('dialogIndex') as number;
+    // Animation de fermeture
+    const npcY = this.currentNPC.y - 30;
     
-    // Passer à la ligne de dialogue suivante
-    dialogIndex = (dialogIndex + 1) % dialogLines.length;
-    this.currentNPC.setData('dialogIndex', dialogIndex);
-    
-    // Si c'est la première ligne, fermer le dialogue
-    if (dialogIndex === 0) {
-      // Obtenir la position actuelle pour l'animation de fermeture
-      const npcY = this.currentNPC.y - 30;
-      
-      // Animation de fermeture
-      this.tweens.add({
-        targets: this.dialogBox,
-        alpha: 0,
-        y: npcY,
-        duration: 200,
-        onComplete: () => {
-          // Cacher la bulle et le texte
-          const bubble = this.dialogText.getData('bubble') as Phaser.GameObjects.Sprite;
-          bubble.setVisible(false);
-          this.dialogText.setVisible(false);
-          
-          this.isDialogActive = false;
-          this.currentNPC = null;
-        }
-      });
-    } else {
-      // Sinon, afficher la ligne suivante
-      this.startDialog(this.currentNPC);
-    }
+    // Animation de fermeture
+    this.tweens.add({
+      targets: this.dialogBox,
+      alpha: 0,
+      y: npcY,
+      duration: 200,
+      onComplete: () => {
+        // Cacher la bulle et le texte
+        const bubble = this.dialogText.getData('bubble') as Phaser.GameObjects.Sprite;
+        bubble.setVisible(false);
+        this.dialogText.setVisible(false);
+        
+        this.isDialogActive = false;
+        this.currentNPC = null;
+        
+        // Déclencher une nouvelle action pour le PNJ après la fin du dialogue
+        this.time.delayedCall(1000, () => {
+          if (this.currentNPC) {
+            this.requestNewNPCAction(this.currentNPC);
+          }
+        });
+      }
+    });
   }
 
   private tryInteractWithNPC(): void {
@@ -1816,5 +1876,211 @@ export class GameScene extends Phaser.Scene {
   private showDebugHitboxes(): void {
     // Activer le débogage visuel des collisions
     this.physics.world.createDebugGraphic();
+  }
+
+  // Teste la connexion au serveur LLM
+  private async testLLMConnection(): Promise<void> {
+    console.log("==== TEST DE CONNEXION AU LLM ====");
+    
+    try {
+      // Créer un contexte minimal de test
+      const testContext = {
+        id: "test-npc",
+        type: "test",
+        x: 0,
+        y: 0,
+        health: 100,
+        nearbyNPCs: [],
+        player: null,
+        visibleObstacles: [],
+        lastAction: null,
+        canAttack: false,
+        scene: this
+      };
+      
+      // Afficher une notification que le test commence
+      const testingText = this.add.text(
+        this.cameras.main.centerX, 
+        this.cameras.main.centerY, 
+        "Test LLM en cours...", 
+        { fontFamily: 'Arial', fontSize: '24px', color: '#ffffff', backgroundColor: '#000000' }
+      );
+      testingText.setOrigin(0.5);
+      testingText.setScrollFactor(0);
+      
+      // Appel direct au LLM
+      console.log("Appel du LLM avec contexte de test");
+      const action = await this.llmService.getNPCAction(testContext as NPCContext);
+      console.log("Test LLM réussi :", action);
+      
+      // Afficher le résultat
+      testingText.setText(`LLM connecté: ${action}`);
+      testingText.setStyle({ fontFamily: 'Arial', fontSize: '24px', color: '#00ff00', backgroundColor: '#000000' });
+      
+      // Faire disparaître le texte après 3 secondes
+      this.time.delayedCall(3000, () => {
+        testingText.destroy();
+      });
+      
+    } catch (error) {
+      console.error("Test LLM échoué:", error);
+      
+      // Afficher une notification d'erreur
+      const errorText = this.add.text(
+        this.cameras.main.centerX, 
+        this.cameras.main.centerY, 
+        `Erreur LLM: ${error}`, 
+        { fontFamily: 'Arial', fontSize: '20px', color: '#ff0000', backgroundColor: '#000000' }
+      );
+      errorText.setOrigin(0.5);
+      errorText.setScrollFactor(0);
+      
+      // Faire disparaître le texte après 5 secondes
+      this.time.delayedCall(5000, () => {
+        errorText.destroy();
+      });
+    }
+  }
+
+  /**
+   * Force tous les PNJ à demander une action au LLM pour devenir autonomes
+   */
+  private forceAllNPCsToMove(): void {
+    console.log("Démarrage du mouvement autonome pour tous les PNJ");
+    
+    this.npcs.getChildren().forEach((npc) => {
+      const npcSprite = npc as Phaser.Physics.Arcade.Sprite;
+      // Demander une action immédiatement pour ce PNJ
+      this.requestNewNPCAction(npcSprite);
+    });
+    
+    // Ajouter un événement qui demande des actions périodiquement pour tous les PNJ
+    // Cela assure un mouvement continu même si les PNJ restent bloqués
+    if (!this.time.paused) {
+      this.time.addEvent({
+        delay: 5000, // Vérifier toutes les 5 secondes
+        callback: () => {
+          this.npcs.getChildren().forEach((npc) => {
+            const npcSprite = npc as Phaser.Physics.Arcade.Sprite;
+            // Si le PNJ n'est pas en mouvement et n'est pas en train d'attaquer
+            if (npcSprite.body && 
+                npcSprite.body.velocity.x === 0 && 
+                npcSprite.body.velocity.y === 0 && 
+                !npcSprite.getData('isAttacking')) {
+              // 50% de chance de demander une nouvelle action
+              if (Phaser.Math.Between(0, 1) === 1) {
+                this.requestNewNPCAction(npcSprite);
+              }
+            }
+          });
+        },
+        loop: true
+      });
+    }
+  }
+  
+  /**
+   * Applique l'action déterminée par le LLM au PNJ
+   */
+  private applyNPCAction(npc: Phaser.Physics.Arcade.Sprite, action: string): void {
+    // Analyser l'action renvoyée par le LLM
+    if (action.includes('MOVE_UP')) {
+      npc.setVelocity(0, -80);
+      npc.anims.play('walk-up', true);
+    } 
+    else if (action.includes('MOVE_DOWN')) {
+      npc.setVelocity(0, 80);
+      npc.anims.play('walk-down', true);
+    }
+    else if (action.includes('MOVE_LEFT')) {
+      npc.setVelocity(-80, 0);
+      npc.anims.play('walk-left', true);
+    }
+    else if (action.includes('MOVE_RIGHT')) {
+      npc.setVelocity(80, 0);
+      npc.anims.play('walk-right', true);
+    }
+    else if (action.includes('ATTACK')) {
+      // Déclencher une attaque
+      if (!npc.getData('isAttacking') && npc.getData('canAttack')) {
+        this.npcAttack(npc, this.time.now);
+      }
+    }
+    else if (action.includes('IDLE') || action.includes('WAIT')) {
+      npc.setVelocity(0, 0);
+      npc.anims.play('idle-down', true);
+    }
+    else {
+      // Action par défaut si non reconnue
+      npc.setVelocity(0, 0);
+    }
+    
+    // Extraire le dialogue de l'action si présent
+    const dialogMatch = action.match(/SAY:(.*?)(?:\||$)/);
+    if (dialogMatch && dialogMatch[1]) {
+      const newDialog = dialogMatch[1].trim();
+      if (newDialog) {
+        // Mettre à jour le dialogue du PNJ
+        const currentDialogs = npc.getData('dialog') || [];
+        if (Array.isArray(currentDialogs)) {
+          // Si c'est déjà un tableau, remplacer le premier élément
+          currentDialogs[0] = newDialog;
+          npc.setData('dialog', currentDialogs);
+        } else {
+          // Sinon créer un nouveau tableau
+          npc.setData('dialog', [newDialog]);
+        }
+      }
+    }
+    
+    // Arrêter le mouvement après un délai plus court pour des mouvements plus fréquents
+    const stopDelay = Phaser.Math.Between(200, 800);
+    this.time.delayedCall(stopDelay, () => {
+      // Ne pas interrompre une attaque en cours
+      if (!npc.getData('isAttacking')) {
+        npc.setVelocity(0, 0);
+        
+        // Décider d'une nouvelle action immédiatement
+        this.requestNewNPCAction(npc);
+      }
+    });
+  }
+  
+  /**
+   * Demande une nouvelle action au LLM pour un PNJ spécifique
+   */
+  private requestNewNPCAction(npc: Phaser.Physics.Arcade.Sprite): void {
+    const name = npc.getData('name') || 'inconnu';
+    
+    // Préparer le contexte pour le LLM
+    const npcContext = {
+      id: name,
+      type: "npc",
+      x: npc.x,
+      y: npc.y,
+      health: 100,
+      canAttack: npc.getData('canAttack') || false,
+      nearbyNPCs: [], 
+      player: {
+        x: this.player.x,
+        y: this.player.y,
+        distance: Phaser.Math.Distance.Between(npc.x, npc.y, this.player.x, this.player.y)
+      },
+      visibleObstacles: [],
+      lastAction: npc.getData('lastAction') || null,
+      scene: this
+    };
+    
+    // Appeler le LLM pour obtenir l'action
+    this.llmService.getNPCAction(npcContext)
+      .then(action => {
+        npc.setData('lastAction', action);
+        this.applyNPCAction(npc, action);
+      })
+      .catch(error => {
+        console.error(`Erreur pour PNJ ${name}:`, error);
+        // En cas d'erreur, réessayer après un délai
+        this.time.delayedCall(2000, () => this.requestNewNPCAction(npc));
+      });
   }
 }
